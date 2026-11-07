@@ -66,7 +66,7 @@ class PaperAutomation:
                     results.append({"symbol": symbol, "status": "stop_loss_filled", "order": tick["order"]})
                     continue
 
-                position = next((p for p in self.broker.portfolio()["positions"] if p["symbol"] == symbol.upper()), None)
+                position = next((p for p in self.broker.portfolio()["positions"] if p["symbol"] == symbol.upper() and p["market"] == market), None)
                 if proposal["action"] == "SELL" and position:
                     order = await asyncio.to_thread(
                         self.broker.place_order, symbol, market, "sell",
