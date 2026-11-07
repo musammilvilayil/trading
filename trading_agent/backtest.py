@@ -101,3 +101,60 @@ def run_ema_backtest(candles: pd.DataFrame, config: BacktestConfig = BacktestCon
                                   "signal_execution": "next candle open"},
         "disclaimer": "Historical simulation only; fees, slippage and future market conditions may differ."
     }
+
+
+def evaluate_ml_walk_forward(featured: pd.DataFrame, min_train: int = 500,
+                             test_window: int = 250) -> dict:
+    """Expanding-window classifier evaluation; every fold trains only on earlier rows."""
+    from sklearn.ensemble import HistGradientBoostingClassifier
+    from sklearn.metrics import (accuracy_score, precision_score, recall_score,
+                                 f1_score, roc_auc_score, brier_score_loss)
+    from .market import FEATURE_COLUMNS
+
+    required = set(FEATURE_COLUMNS) | {"target"}
+    if not required.issubset(featured.columns):
+        raise ValueError("Feature frame is missing model inputs or target.")
+    data = featured.dropna(subset=list(required)).copy()
+    if len(data) < min_train + 50:
+        raise ValueError(f"Need at least {min_train + 50} labelled rows for walk-forward evaluation.")
+    y_true, y_pred, probabilities = [], [], []
+    folds = []
+    for start in range(min_train, len(data), test_window):
+        end = min(start + test_window, len(data))
+        train = data.iloc[:start]
+        test = data.iloc[start:end]
+        if test.empty or train["target"].nunique() < 2:
+            continue
+        model = HistGradientBoostingClassifier(max_depth=3, learning_rate=0.05,
+                                               max_iter=75, random_state=42)
+        model.fit(train[FEATURE_COLUMNS], train["target"].astype(int))
+        probability = model.predict_proba(test[FEATURE_COLUMNS])[:, 1]
+        prediction = (probability >= 0.5).astype(int)
+        y_true.extend(test["target"].astype(int).tolist())
+        y_pred.extend(prediction.tolist())
+        probabilities.extend(probability.tolist())
+        folds.append({"train_rows": len(train), "test_rows": len(test),
+                      "train_end": str(train.index[-1]), "test_start": str(test.index[0]),
+                      "test_end": str(test.index[-1])})
+    if not y_true:
+        raise ValueError("No valid walk-forward folds could be evaluated.")
+    metrics = {
+        "accuracy_pct": round(accuracy_score(y_true, y_pred) * 100, 2),
+        "precision_pct": round(precision_score(y_true, y_pred, zero_division=0) * 100, 2),
+        "recall_pct": round(recall_score(y_true, y_pred, zero_division=0) * 100, 2),
+        "f1_pct": round(f1_score(y_true, y_pred, zero_division=0) * 100, 2),
+        "brier_score": round(brier_score_loss(y_true, probabilities), 5),
+    }
+    if len(set(y_true)) == 2:
+        metrics["roc_auc_pct"] = round(roc_auc_score(y_true, probabilities) * 100, 2)
+    else:
+        metrics["roc_auc_pct"] = None
+    return {
+        "evaluation": "expanding_window_walk_forward",
+        "rows_evaluated": len(y_true),
+        "fold_count": len(folds),
+        "metrics": metrics,
+        "folds": folds,
+        "label_definition": "next available candle close > current candle close",
+        "disclaimer": "Out-of-sample historical classification metrics; not strategy returns or a guarantee of future performance."
+    }
