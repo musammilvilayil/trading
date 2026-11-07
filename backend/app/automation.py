@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Callable, Any
 
 from .paper import PaperBroker, PaperTradeRejected
+from .execution import build_paper_buy_plan
 
 
 class PaperAutomation:
@@ -60,14 +61,10 @@ class PaperAutomation:
                 equity = self.broker.portfolio()["equity"]
                 report = await asyncio.to_thread(self.analyzer, symbol, market, equity)
                 instrument = report["instrument"]
-                if instrument["quote_currency"] != "INR":
-                    results.append({"symbol": symbol, "status": "research_only",
-                                    "reason": "Non-INR quote; FX-normalized paper risk sizing is not enabled."})
-                    continue
-
                 proposal = report["proposal"]
-                price = float(proposal["entry"])
-                tick = await asyncio.to_thread(self.broker.process_price, symbol, market, price)
+                fx_rate = float(report["fx_to_inr"])
+                price_inr = float(proposal["entry"]) * fx_rate
+                tick = await asyncio.to_thread(self.broker.process_price, symbol, market, price_inr)
                 if tick.get("stop_triggered"):
                     results.append({"symbol": symbol, "status": "stop_loss_filled", "order": tick["order"]})
                     continue
@@ -76,17 +73,24 @@ class PaperAutomation:
                 if proposal["action"] == "SELL" and position:
                     order = await asyncio.to_thread(
                         self.broker.place_order, symbol, market, "sell",
-                        float(position["quantity"]), price, None, "autonomous_ml_exit"
+                        float(position["quantity"]), price_inr, None, "autonomous_ml_exit"
                     )
                     results.append({"symbol": symbol, "status": "exit_filled", "order": order})
-                elif proposal["action"] == "BUY" and not position and report["risk_approved_paper_order"]:
-                    approved = report["risk_approved_paper_order"]
+                elif proposal["action"] == "BUY" and not position:
+                    snapshot = self.broker.portfolio()
+                    plan = build_paper_buy_plan(proposal, snapshot["equity"], snapshot["cash"],
+                                                snapshot["capital"], fx_rate, market)
+                    if not plan:
+                        results.append({"symbol": symbol, "status": "no_action",
+                                        "reason": "Position sizing is below the minimum tradable quantity."})
+                        continue
                     order = await asyncio.to_thread(
                         self.broker.place_order, symbol, market, "buy",
-                        float(approved["quantity"]), float(approved["entry"]),
-                        float(approved["stop"]), "autonomous_ml_entry"
+                        float(plan["quantity"]), float(plan["entry_inr"]),
+                        float(plan["stop_loss_inr"]), "autonomous_ml_entry"
                     )
-                    results.append({"symbol": symbol, "status": "entry_filled", "order": order})
+                    results.append({"symbol": symbol, "status": "entry_filled",
+                                    "order": order, "risk_plan": plan})
                 else:
                     results.append({"symbol": symbol, "status": "no_action",
                                     "signal": proposal["action"], "has_position": bool(position)})
