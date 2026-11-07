@@ -7,6 +7,7 @@ from .paper import PaperBroker, PaperTradeRejected
 from .automation import PaperAutomation
 from trading_agent.providers import fetch_market_candles, quote_to_inr_rate
 from trading_agent.backtest import BacktestConfig, run_ema_backtest
+from .execution import build_paper_buy_plan
 
 paper_broker = PaperBroker(initial_capital=settings.starting_capital)
 automation_service = PaperAutomation(paper_broker, analyze_with_preserved_ml)
@@ -128,6 +129,15 @@ def provider_candles(symbol: str, market: Market, period: str = "60d", interval:
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"Market data unavailable: {exc}") from exc
 
+
+
+@app.get("/api/market/fx-to-inr")
+def fx_to_inr(currency: str):
+    try:
+        return {"currency": currency.upper(), "fx_to_inr": quote_to_inr_rate(currency),
+                "data_source": "Yahoo Finance recent historical FX close"}
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"FX conversion unavailable: {exc}") from exc
 
 @app.post("/api/backtest")
 def backtest(request: BacktestRequest):
