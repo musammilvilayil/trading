@@ -38,7 +38,7 @@ class PaperBroker:
               day_key TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS positions (
-              symbol TEXT PRIMARY KEY, market TEXT NOT NULL, quantity REAL NOT NULL,
+              symbol TEXT NOT NULL, market TEXT NOT NULL, quantity REAL NOT NULL,
               average_price REAL NOT NULL, last_price REAL NOT NULL, stop_loss REAL,
               updated_at TEXT NOT NULL,
               PRIMARY KEY(market, symbol)
