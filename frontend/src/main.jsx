@@ -12,6 +12,7 @@ function App() {
   const [symbol, setSymbol] = useState('BTC-USD');
   const [analysis, setAnalysis] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [useMl, setUseMl] = useState(true);
   const [error, setError] = useState('');
   const [health, setHealth] = useState(null);
 
@@ -26,11 +27,14 @@ function App() {
   async function analyze() {
     setLoading(true); setError('');
     try {
-      const res = await fetch(API + '/api/analyze', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({symbol, market}) });
+      const res = await fetch(API + (useMl ? '/api/analyze/ml' : '/api/analyze'), { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({symbol, market}) });
       if (!res.ok) throw new Error('Analysis request failed');
       setAnalysis(await res.json());
     } catch (e) { setError(e.message); } finally { setLoading(false); }
   }
+  const signal = analysis?.proposal?.action?.toLowerCase() || analysis?.signal;
+  const confidence = analysis?.proposal?.confidence ?? analysis?.confidence;
+  const lastPrice = analysis?.proposal?.entry ?? analysis?.last_price;
   const metrics = useMemo(() => [
     {label:'Paper equity', value:fmt(dashboard?.equity), icon:Wallet, detail:'Cash + marked paper positions'},
     {label:'Available cash', value:fmt(dashboard?.cash), icon:CircleDollarSign, detail:'Unallocated paper capital'},
@@ -51,8 +55,8 @@ function App() {
       <div className="grid">
         <article className="panel analysis"><div className="panel-title"><div><span className="eyebrow">STRATEGY WORKBENCH</span><h2>AI market analysis</h2></div><span className="tag">MOCK DATA</span></div>
           <p className="muted">Run an illustrative moving-average and momentum analysis on a sample instrument.</p>
-          <div className="controls"><select value={market} onChange={e=>setMarket(e.target.value)}><option value="stocks">Stocks</option><option value="crypto">Crypto</option><option value="forex">Forex</option><option value="commodities">Commodities</option></select><input value={symbol} onChange={e=>setSymbol(e.target.value.toUpperCase())} aria-label="Symbol"/><button onClick={analyze} disabled={loading}>{loading?'Analysing…':'Analyse market'}</button></div>
-          {analysis && <div className="result"><div><small>MODEL SIGNAL</small><strong className={'signal '+analysis.signal}>{analysis.signal.toUpperCase()}</strong></div><div><small>CONFIDENCE (HEURISTIC)</small><b>{(analysis.confidence*100).toFixed(1)}%</b></div><div><small>LAST SAMPLE PRICE</small><b>{analysis.last_price.toFixed(2)}</b></div><p>{analysis.disclaimer}</p></div>}
+          <div className="controls"><select value={market} onChange={e=>setMarket(e.target.value)}><option value="stocks">Stocks</option><option value="crypto">Crypto</option><option value="forex">Forex</option><option value="commodities">Commodities</option></select><input value={symbol} onChange={e=>setSymbol(e.target.value.toUpperCase())} aria-label="Symbol"/><label className="ml-toggle"><input type="checkbox" checked={useMl} onChange={e=>setUseMl(e.target.checked)}/> V1 ML model</label><button onClick={analyze} disabled={loading}>{loading?'Analysing…':'Analyse market'}</button></div>
+          {analysis && <div className="result"><div><small>MODEL SIGNAL</small><strong className={'signal '+signal}>{(signal || 'wait').toUpperCase()}</strong></div><div><small>MODEL CONFIDENCE</small><b>{confidence == null ? '—' : (confidence*100).toFixed(1)+'%'}</b></div><div><small>LAST / ENTRY PRICE</small><b>{lastPrice == null ? '—' : Number(lastPrice).toFixed(2)}</b></div><p>{analysis.disclaimer || analysis.data_source + ' · ' + analysis.data_mode + ' · ' + (analysis.risk_approved_paper_order ? 'Risk approved for paper review' : 'No order approved')}</p></div>}
         </article>
         <article className="panel agents"><div className="panel-title"><div><span className="eyebrow">AUTOMATION LAYER</span><h2>Agent status</h2></div><Cpu size={19}/></div>
           {[['Market research','Sample data adapter','active'],['Strategy engine','SMA + momentum rules','active'],['Risk manager','Order guardrails','active'],['Broker execution','Not connected','locked']].map(([a,b,c])=><div className="agent-row" key={a}><span className="agent-dot"/><div><b>{a}</b><small>{b}</small></div><span className={'agent-state '+c}>{c}</span></div>)}
