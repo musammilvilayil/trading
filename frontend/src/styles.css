@@ -13,3 +13,10 @@
 .backtest-stats b{font-size:17px}
 .backtest-stats p{grid-column:1/-1;color:#8191a7;font-size:10px;margin:0}
 @media(max-width:650px){.trade-form{grid-template-columns:1fr 1fr}.trade-form label:last-of-type{grid-column:1/-1}.trade-form button{grid-column:1/-1}.action-row button{flex:1;justify-content:center}}
+
+.position-list{display:grid}
+.position{display:grid;grid-template-columns:1fr 1fr auto;align-items:center;gap:12px;padding:12px 0;border-top:1px solid #202e41}
+.position b{font-size:11px}
+.position small{display:block;color:#71839b;font-size:10px;margin-top:4px}
+.position button{font-size:10px;padding:7px 11px}
+@media(max-width:650px){.position{grid-template-columns:1fr 1fr auto;gap:7px}.position button{padding:7px;font-size:9px}}
