@@ -10,7 +10,8 @@ Personal AI research and **autonomous paper-trading** workspace, built on top of
 - FastAPI backend and responsive React/Vite dashboard.
 - SQLite paper ledger with persistent account, average-cost accounting, realized/unrealized P&L, simulated fees/slippage, order journal and stop-loss monitoring.
 - Deterministic risk limits: 0.5% equity risk per trade, 2% daily drawdown guard, 10% initial-capital buy-order cap and 50% gross exposure cap.
-- EMA crossover historical backtest with next-candle-open execution, fees, slippage, drawdown, Sharpe and win-rate reporting. Backtest capital is converted from INR into the instrument quote currency and results are reported in that currency.
+- EMA crossover historical backtest with next-candle-open execution, fees, slippage, drawdown, Sharpe and win-rate reporting.
+- Expanding-window, out-of-sample ML walk-forward evaluation with accuracy, precision, recall, F1, ROC-AUC and Brier score. Backtest capital is converted from INR into the instrument quote currency and results are reported in that currency.
 - Opt-in autonomous paper worker with watchlist, 1–60 minute scan interval, start/stop controls, ML-based entry/exit proposals, FX-aware sizing and stop-loss checks.
 - Open-position monitor and manual close controls in the dashboard.
 - GitHub Actions tests/build and Docker Compose with persistent SQLite volume.
@@ -62,6 +63,7 @@ The SQLite ledger persists in the named `atlas_data` volume.
 | POST | `/api/analyze` | Mock-data technical signal |
 | POST | `/api/analyze/ml` | Historical-data V1 ML research analysis |
 | POST | `/api/backtest` | Historical EMA baseline backtest |
+| POST | `/api/backtest/ml` | Expanding-window out-of-sample ML metrics |
 | GET | `/api/paper/portfolio` | Paper account and positions |
 | POST | `/api/paper/orders` | Simulated INR-denominated order |
 | POST | `/api/paper/market-tick` | Mark position and check stop-loss |
@@ -97,7 +99,7 @@ Example INR paper order:
 
 1. Replace the process-local automation loop with a durable worker/queue and persisted run state.
 2. Add more data vendors, exchange instrument master, exchange calendars and corporate actions.
-3. Add ML walk-forward evaluation, model registry, drift monitoring and scheduled retraining.
+3. Add model registry, drift monitoring and scheduled retraining; the current walk-forward evaluator is a first validation baseline.
 4. Add market-specific fees, taxes, lot sizes, spreads, latency and realistic order-book simulation.
 5. Add alert delivery, observability, secrets management and disaster recovery.
 6. Consider broker sandbox integration only after sustained paper validation and legal/regulatory review.
