@@ -4,10 +4,12 @@ from pydantic import BaseModel, Field
 from .core import Market, Side, settings, market_data, strategy_engine
 from .ml_adapter import analyze_with_preserved_ml
 from .paper import PaperBroker, PaperTradeRejected
+from .automation import PaperAutomation
 from trading_agent.providers import fetch_market_candles
 from trading_agent.backtest import BacktestConfig, run_ema_backtest
 
 paper_broker = PaperBroker(initial_capital=settings.starting_capital)
+automation_service = PaperAutomation(paper_broker, analyze_with_preserved_ml)
 
 app = FastAPI(title="Atlas AI Trading API", version="0.3.0",
               description="Multi-market research and paper trading. Live trading is disabled.")
@@ -142,6 +144,38 @@ def backtest(request: BacktestRequest):
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"Backtest unavailable: {exc}") from exc
 
+
+
+
+
+class AutomationInstrument(BaseModel):
+    symbol: str = Field(min_length=2, max_length=24)
+    market: Market
+
+
+class AutomationStartRequest(BaseModel):
+    watchlist: list[AutomationInstrument] = Field(min_length=1, max_length=10)
+    interval_seconds: int = Field(default=300, ge=60, le=3600)
+
+
+@app.get("/api/automation/status")
+def automation_status():
+    return automation_service.status()
+
+
+@app.post("/api/automation/start")
+async def automation_start(request: AutomationStartRequest):
+    try:
+        watchlist = [{"symbol": item.symbol.upper(), "market": item.market.value}
+                     for item in request.watchlist]
+        return await automation_service.start(watchlist, request.interval_seconds)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/automation/stop")
+async def automation_stop():
+    return await automation_service.stop()
 
 @app.post("/api/automation/run-once")
 def autonomous_paper_run(request: AnalyzeRequest):
