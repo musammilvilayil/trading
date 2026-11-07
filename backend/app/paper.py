@@ -104,8 +104,8 @@ class PaperBroker:
             equity = self._equity(db)
             if side == "buy":
                 self._daily_guard(db, equity)
-            if notional > account["initial_capital"] * 0.10:
-                raise PaperTradeRejected("Order exceeds 10% of initial paper capital.")
+            if side == "buy" and notional > account["initial_capital"] * 0.10:
+                raise PaperTradeRejected("Buy order exceeds 10% of initial paper capital.")
             realized = 0.0
             if side == "buy":
                 if (reference_price - stop_loss) * quantity > equity * 0.005:
@@ -119,8 +119,9 @@ class PaperBroker:
                 if old:
                     total = old["quantity"] + quantity
                     avg = (old["quantity"] * old["average_price"] + quantity * execution_price + fee) / total
+                    effective_stop = max(old["stop_loss"] or 0, stop_loss)
                     db.execute("UPDATE positions SET quantity=?,average_price=?,last_price=?,stop_loss=?,updated_at=? WHERE symbol=?",
-                               (total, avg, reference_price, stop_loss, now, symbol))
+                               (total, avg, reference_price, effective_stop, now, symbol))
                 else:
                     db.execute("INSERT INTO positions VALUES(?,?,?,?,?,?,?)",
                                (symbol, market, quantity, execution_price + fee / quantity, reference_price, stop_loss, now))

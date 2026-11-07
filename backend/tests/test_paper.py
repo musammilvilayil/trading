@@ -30,3 +30,10 @@ def test_paper_broker_stop_loss_triggers_exit(tmp_path):
     result = broker.process_price("BTC-USD", "crypto", 980)
     assert result["stop_triggered"] is True
     assert result["order"]["side"] == "sell"
+
+
+def test_selling_position_is_not_blocked_by_buy_order_cap(tmp_path):
+    broker = PaperBroker(str(tmp_path / "paper.db"))
+    broker.place_order("ABC", "stocks", "buy", 2.4, 1000, 990)
+    sell = broker.place_order("ABC", "stocks", "sell", 2.4, 1300)
+    assert sell["status"] == "filled_simulated"
