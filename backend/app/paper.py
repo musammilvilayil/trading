@@ -40,7 +40,8 @@ class PaperBroker:
             CREATE TABLE IF NOT EXISTS positions (
               symbol TEXT PRIMARY KEY, market TEXT NOT NULL, quantity REAL NOT NULL,
               average_price REAL NOT NULL, last_price REAL NOT NULL, stop_loss REAL,
-              updated_at TEXT NOT NULL
+              updated_at TEXT NOT NULL,
+              PRIMARY KEY(market, symbol)
             );
             CREATE TABLE IF NOT EXISTS orders (
               id TEXT PRIMARY KEY, symbol TEXT NOT NULL, market TEXT NOT NULL,
@@ -50,6 +51,17 @@ class PaperBroker:
             );
             CREATE INDEX IF NOT EXISTS idx_orders_created ON orders(created_at);
             """)
+            position_info = db.execute("PRAGMA table_info(positions)").fetchall()
+            primary_key_columns = [row["name"] for row in sorted(position_info, key=lambda item: item["pk"]) if row["pk"]]
+            if primary_key_columns == ["symbol"]:
+                db.execute("ALTER TABLE positions RENAME TO positions_legacy")
+                db.execute("""CREATE TABLE positions (
+                    symbol TEXT NOT NULL, market TEXT NOT NULL, quantity REAL NOT NULL,
+                    average_price REAL NOT NULL, last_price REAL NOT NULL, stop_loss REAL,
+                    updated_at TEXT NOT NULL, PRIMARY KEY(market, symbol)
+                )""")
+                db.execute("INSERT OR IGNORE INTO positions SELECT * FROM positions_legacy")
+                db.execute("DROP TABLE positions_legacy")
             db.execute("INSERT OR IGNORE INTO account(id,initial_capital,cash,day_start_equity,day_key) VALUES(1,?,?,?,?)",
                        (self.initial_capital, self.initial_capital, self.initial_capital,
                         datetime.now(timezone.utc).date().isoformat()))
@@ -115,19 +127,19 @@ class PaperBroker:
                 exposure = db.execute("SELECT COALESCE(SUM(quantity*last_price),0) AS value FROM positions").fetchone()["value"]
                 if exposure + notional > account["initial_capital"] * 0.50:
                     raise PaperTradeRejected("Portfolio exposure would exceed 50% of initial capital.")
-                old = db.execute("SELECT * FROM positions WHERE symbol=?", (symbol,)).fetchone()
+                old = db.execute("SELECT * FROM positions WHERE market=? AND symbol=?", (market, symbol)).fetchone()
                 if old:
                     total = old["quantity"] + quantity
                     avg = (old["quantity"] * old["average_price"] + quantity * execution_price + fee) / total
                     effective_stop = max(old["stop_loss"] or 0, stop_loss)
-                    db.execute("UPDATE positions SET quantity=?,average_price=?,last_price=?,stop_loss=?,updated_at=? WHERE symbol=?",
-                               (total, avg, reference_price, effective_stop, now, symbol))
+                    db.execute("UPDATE positions SET quantity=?,average_price=?,last_price=?,stop_loss=?,updated_at=? WHERE market=? AND symbol=?",
+                               (total, avg, reference_price, effective_stop, now, market, symbol))
                 else:
                     db.execute("INSERT INTO positions VALUES(?,?,?,?,?,?,?)",
                                (symbol, market, quantity, execution_price + fee / quantity, reference_price, stop_loss, now))
                 db.execute("UPDATE account SET cash=cash-? WHERE id=1", (notional + fee,))
             else:
-                old = db.execute("SELECT * FROM positions WHERE symbol=?", (symbol,)).fetchone()
+                old = db.execute("SELECT * FROM positions WHERE symbol=?", (market, symbol)).fetchone()
                 if old is None or old["quantity"] + 1e-12 < quantity:
                     raise PaperTradeRejected("Insufficient paper position to sell.")
                 realized = (execution_price - old["average_price"]) * quantity - fee
@@ -136,7 +148,7 @@ class PaperBroker:
                     db.execute("DELETE FROM positions WHERE symbol=?", (symbol,))
                 else:
                     db.execute("UPDATE positions SET quantity=?,last_price=?,updated_at=? WHERE symbol=?",
-                               (remaining, reference_price, now, symbol))
+                               (remaining, reference_price, now, market, symbol))
                 db.execute("UPDATE account SET cash=cash+?,realized_pnl=realized_pnl+? WHERE id=1",
                            (notional - fee, realized))
             order_id = f"PAPER-{uuid4().hex[:12].upper()}"
@@ -154,11 +166,11 @@ class PaperBroker:
             raise PaperTradeRejected("Price must be positive.")
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            position = db.execute("SELECT * FROM positions WHERE symbol=?", (symbol.upper(),)).fetchone()
+            position = db.execute("SELECT * FROM positions WHERE symbol=?", (market, symbol.upper())).fetchone()
             if not position:
                 return {"symbol": symbol.upper(), "updated": False, "reason": "no_open_position"}
             db.execute("UPDATE positions SET last_price=?,updated_at=? WHERE symbol=?",
-                       (price, datetime.now(timezone.utc).isoformat(), symbol.upper()))
+                       (price, datetime.now(timezone.utc).isoformat(), market, symbol.upper()))
             stop = position["stop_loss"]
             should_exit = stop is not None and price <= stop
             if not should_exit:
