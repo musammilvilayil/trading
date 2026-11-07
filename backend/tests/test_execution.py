@@ -1,5 +1,5 @@
 import pytest
-from backend.app.execution import build_paper_buy_plan
+from app.execution import build_paper_buy_plan
 
 
 def test_order_plan_converts_quote_to_inr_and_respects_risk_cap():
