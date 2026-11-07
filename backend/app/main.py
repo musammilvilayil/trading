@@ -6,7 +6,8 @@ from .ml_adapter import analyze_with_preserved_ml
 from .paper import PaperBroker, PaperTradeRejected
 from .automation import PaperAutomation
 from trading_agent.providers import fetch_market_candles, quote_to_inr_rate
-from trading_agent.backtest import BacktestConfig, run_ema_backtest
+from trading_agent.backtest import BacktestConfig, run_ema_backtest, evaluate_ml_walk_forward
+from trading_agent.market import features
 from .execution import build_paper_buy_plan
 
 paper_broker = PaperBroker(initial_capital=settings.starting_capital)
@@ -171,6 +172,21 @@ class AutomationStartRequest(BaseModel):
     watchlist: list[AutomationInstrument] = Field(min_length=1, max_length=10)
     interval_seconds: int = Field(default=300, ge=60, le=3600)
 
+
+
+@app.post("/api/backtest/ml")
+def ml_walk_forward_backtest(request: AnalyzeRequest):
+    try:
+        instrument, frame = fetch_market_candles(request.symbol, request.market.value,
+                                                  period="60d", interval="5m")
+        featured = features(frame)
+        result = evaluate_ml_walk_forward(featured)
+        result["instrument"] = instrument.__dict__
+        result["data_source"] = instrument.provider
+        result["data_mode"] = "historical_walk_forward"
+        return result
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"ML walk-forward evaluation unavailable: {exc}") from exc
 
 @app.get("/api/automation/status")
 def automation_status():
