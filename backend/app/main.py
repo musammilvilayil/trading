@@ -5,7 +5,7 @@ from .core import Market, Side, settings, market_data, strategy_engine
 from .ml_adapter import analyze_with_preserved_ml
 from .paper import PaperBroker, PaperTradeRejected
 from .automation import PaperAutomation
-from trading_agent.providers import fetch_market_candles
+from trading_agent.providers import fetch_market_candles, quote_to_inr_rate
 from trading_agent.backtest import BacktestConfig, run_ema_backtest
 
 paper_broker = PaperBroker(initial_capital=settings.starting_capital)
@@ -122,8 +122,9 @@ def provider_candles(symbol: str, market: Market, period: str = "60d", interval:
         instrument, frame = fetch_market_candles(symbol, market.value, period, interval)
         rows = [{"time": index.isoformat(), **{key.lower(): float(row[key]) for key in ["Open", "High", "Low", "Close", "Volume"]}}
                 for index, row in frame.iterrows()]
+        fx_rate = quote_to_inr_rate(instrument.quote_currency)
         return {"instrument": instrument.__dict__, "data_mode": "provider_historical",
-                "count": len(rows), "candles": rows}
+                "fx_to_inr": fx_rate, "count": len(rows), "candles": rows}
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"Market data unavailable: {exc}") from exc
 
@@ -134,12 +135,15 @@ def backtest(request: BacktestRequest):
         instrument, frame = fetch_market_candles(request.symbol, request.market.value,
                                                   request.period, request.interval)
         # The backtest's cash unit matches the instrument quote currency.
-        result = run_ema_backtest(frame, BacktestConfig(starting_cash=settings.starting_capital))
+        fx_rate = quote_to_inr_rate(instrument.quote_currency)
+        result = run_ema_backtest(frame, BacktestConfig(starting_cash=settings.starting_capital / fx_rate))
         result["instrument"] = instrument.__dict__
         result["account_currency"] = instrument.quote_currency
+        result["starting_capital_inr"] = settings.starting_capital
+        result["fx_to_inr"] = fx_rate
         result["data_mode"] = "provider_historical"
-        result["disclaimer"] = ("Historical simulation in instrument quote currency; this is not the INR paper ledger. "
-                                "Fees, slippage and future market conditions may differ.")
+        result["disclaimer"] = ("Starting INR capital is converted using a recent provider FX close; "
+                                "results are reported in instrument quote currency. Fees, slippage and future conditions may differ.")
         return result
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"Backtest unavailable: {exc}") from exc
@@ -182,20 +186,21 @@ def autonomous_paper_run(request: AnalyzeRequest):
     try:
         report = analyze_with_preserved_ml(request.symbol.upper(), request.market.value,
                                             paper_broker.portfolio()["equity"])
-        instrument = report["instrument"]
-        if instrument["quote_currency"] != "INR":
-            return {"status": "research_only", "analysis": report,
-                    "reason": "Autonomous paper execution requires INR-denominated pricing. "
-                              "This instrument is quoted in another currency; FX-normalized risk sizing is not enabled."}
         proposal = report["proposal"]
-        approved = report["risk_approved_paper_order"]
-        if not approved or proposal["action"] != "BUY":
+        if proposal["action"] != "BUY":
             return {"status": "no_trade", "analysis": report,
-                    "reason": "No risk-approved long entry; no order was submitted."}
+                    "reason": "No long entry signal; no order was submitted."}
+        snapshot = paper_broker.portfolio()
+        plan = build_paper_buy_plan(proposal, snapshot["equity"], snapshot["cash"],
+                                    snapshot["capital"], report["fx_to_inr"], request.market.value)
+        if not plan:
+            return {"status": "no_trade", "analysis": report,
+                    "reason": "Risk sizing is below the minimum tradable quantity or available cash."}
         order = paper_broker.place_order(request.symbol.upper(), request.market.value,
-                                         "buy", approved["quantity"], approved["entry"],
-                                         stop_loss=approved["stop"], reason="autonomous_ml_paper_agent")
+                                         "buy", plan["quantity"], plan["entry_inr"],
+                                         stop_loss=plan["stop_loss_inr"],
+                                         reason="autonomous_ml_paper_agent")
         return {"status": "paper_order_filled", "analysis": report, "order": order,
-                "live_trading_enabled": False}
+                "risk_plan": plan, "live_trading_enabled": False}
     except (PaperTradeRejected, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
