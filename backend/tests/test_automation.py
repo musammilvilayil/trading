@@ -39,6 +39,7 @@ def test_automation_converts_usd_quote_and_executes_only_paper_order(tmp_path):
             "proposal": {"action": "BUY", "entry": 1.0, "atr": 0.01},
         }
     service = PaperAutomation(broker, fake_analyzer)
+    service._watchlist = [{"symbol": "BTC-USD", "market": "crypto"}]
     async def exercise():
         await service._cycle()
         assert service.status()["last_results"][0]["status"] == "entry_filled"
