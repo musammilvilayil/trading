@@ -12,6 +12,8 @@ function App() {
   const [symbol, setSymbol] = useState('RELIANCE');
   const [analysis, setAnalysis] = useState(null);
   const [backtest, setBacktest] = useState(null);
+  const [mlBacktest, setMlBacktest] = useState(null);
+  const [mlBacktestBusy, setMlBacktestBusy] = useState(false);
   const [loading, setLoading] = useState(false);
   const [useMl, setUseMl] = useState(true);
   const [autoBusy, setAutoBusy] = useState(false);
@@ -113,6 +115,16 @@ function App() {
     } catch(e) { setError(e.message); }
   }
 
+  async function runMlBacktest() {
+    setMlBacktestBusy(true); setError(''); setNotice('');
+    try {
+      const res = await fetch(API + '/api/backtest/ml', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol,market})});
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.detail || 'ML walk-forward evaluation failed');
+      setMlBacktest(body);
+    } catch(e) { setError(e.message); } finally { setMlBacktestBusy(false); }
+  }
+
   async function placeOrder() {
     setOrderBusy(true); setError(''); setNotice('');
     try {
@@ -153,7 +165,7 @@ function App() {
           <p className="muted">Choose a market and provider symbol. ML analysis uses historical Yahoo Finance candles. Autonomous mode is paper-only and scans every 5 minutes.</p>
           <div className="controls"><select value={market} onChange={e=>setMarket(e.target.value)}><option value="stocks">Stocks</option><option value="crypto">Crypto</option><option value="forex">Forex</option><option value="commodities">Commodities</option></select><input value={symbol} onChange={e=>setSymbol(e.target.value.toUpperCase())} aria-label="Symbol"/><label className="ml-toggle"><input type="checkbox" checked={useMl} onChange={e=>setUseMl(e.target.checked)}/> V1 ML</label><button onClick={analyze} disabled={loading}>{loading?'Analysing…':'Analyse'}</button></div>
           {analysis && <div className="result"><div><small>MODEL SIGNAL</small><strong className={'signal '+signal}>{(signal || 'wait').toUpperCase()}</strong></div><div><small>CONFIDENCE</small><b>{confidence == null ? '—' : (confidence*100).toFixed(1)+'%'}</b></div><div><small>LAST / ENTRY</small><b>{lastPrice == null ? '—' : Number(lastPrice).toFixed(2)}</b></div><p>{analysis.disclaimer || analysis.data_source + ' · ' + analysis.data_mode}</p></div>}
-          <div className="action-row"><button onClick={runAutonomous} disabled={autoBusy}><Play size={14}/>{autoBusy?'Running agent…':'Run one AI cycle'}</button><button className="secondary" onClick={autoStatus?.running ? stopAutomation : startAutomation} disabled={autoBusy}>{autoStatus?.running ? 'Stop autonomous' : 'Start autonomous'}</button><button className="secondary" onClick={runBacktest} disabled={backtestBusy}><FlaskConical size={14}/>{backtestBusy?'Testing…':'Backtest 2 years'}</button></div>
+          <div className="action-row"><button onClick={runAutonomous} disabled={autoBusy}><Play size={14}/>{autoBusy?'Running agent…':'Run one AI cycle'}</button><button className="secondary" onClick={autoStatus?.running ? stopAutomation : startAutomation} disabled={autoBusy}>{autoStatus?.running ? 'Stop autonomous' : 'Start autonomous'}</button><button className="secondary" onClick={runBacktest} disabled={backtestBusy}><FlaskConical size={14}/>{backtestBusy?'Testing…':'EMA backtest 2 years'}</button><button className="secondary" onClick={runMlBacktest} disabled={mlBacktestBusy}><FlaskConical size={14}/>{mlBacktestBusy?'Evaluating…':'ML walk-forward'}</button></div>
         </article>
         <article className="panel agents"><div className="panel-title"><div><span className="eyebrow">AUTOMATION LAYER</span><h2>Agent status</h2></div><Cpu size={19}/></div>
           {[['Market research','Yahoo Finance historical adapter','active'],['ML strategy','HistGradientBoosting + EMA/VWAP','active'],['Risk manager','0.5% trade risk / 2% daily guard','active'],['Paper broker','SQLite ledger + simulated fills','active'],['Live execution','Not implemented / disabled','locked']].map(([a,b,c])=><div className="agent-row" key={a}><span className="agent-dot"/><div><b>{a}</b><small>{b}</small></div><span className={'agent-state '+c}>{c}</span></div>)}
@@ -168,6 +180,9 @@ function App() {
           {backtest ? <div className="backtest-stats"><div><small>NET RETURN</small><b>{backtest.total_return_pct}%</b></div><div><small>MAX DRAWDOWN</small><b>{backtest.max_drawdown_pct}%</b></div><div><small>WIN RATE</small><b>{backtest.win_rate_pct}%</b></div><div><small>TRADES</small><b>{backtest.closed_trades}</b></div><p>{backtest.account_currency} quote currency · {backtest.execution_assumptions?.signal_execution} · fees/slippage included.</p></div> : <div className="empty"><FlaskConical size={22}/><b>No backtest run</b><span>Run a 2-year EMA crossover simulation above.</span></div>}
         </article>
       </div>
+      <article className="panel ml-evaluation"><div className="panel-title"><div><span className="eyebrow">MODEL VALIDATION</span><h2>Out-of-sample ML evaluation</h2></div><Cpu size={18}/></div>
+        {mlBacktest ? <div className="backtest-stats"><div><small>ACCURACY</small><b>{mlBacktest.metrics.accuracy_pct}%</b></div><div><small>PRECISION</small><b>{mlBacktest.metrics.precision_pct}%</b></div><div><small>RECALL</small><b>{mlBacktest.metrics.recall_pct}%</b></div><div><small>F1 SCORE</small><b>{mlBacktest.metrics.f1_pct}%</b></div><div><small>ROC-AUC</small><b>{mlBacktest.metrics.roc_auc_pct == null ? 'N/A' : mlBacktest.metrics.roc_auc_pct+'%'}</b></div><div><small>FOLDS / ROWS</small><b>{mlBacktest.fold_count} / {mlBacktest.rows_evaluated}</b></div><p>Expanding-window out-of-sample classifier evaluation · {mlBacktest.instrument?.provider_symbol} · Not strategy returns.</p></div> : <div className="empty"><Cpu size={22}/><b>No ML evaluation yet</b><span>Run an expanding-window evaluation before trusting model signals.</span></div>}
+      </article>
       <article className="panel positions"><div className="panel-title"><div><span className="eyebrow">OPEN EXPOSURE</span><h2>Paper positions</h2></div><span className="tag">{dashboard?.positions?.length || 0} OPEN</span></div>
         {dashboard?.positions?.length ? <div className="position-list">{dashboard.positions.map(p=><div className="position" key={p.symbol}><div><b>{p.symbol}</b><small>{p.market} · {p.quantity} units · stop {fmt(p.stop_loss)}</small></div><div><b>{fmt(p.last_price)}</b><small>Avg cost {fmt(p.average_price)}</small></div><button className="secondary" onClick={()=>closePosition(p)}>Close</button></div>)}</div> : <div className="empty"><Wallet size={22}/><b>No open positions</b><span>Paper holdings will appear here.</span></div>}
       </article>
