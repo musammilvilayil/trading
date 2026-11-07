@@ -37,3 +37,12 @@ def test_selling_position_is_not_blocked_by_buy_order_cap(tmp_path):
     broker.place_order("ABC", "stocks", "buy", 2.4, 1000, 990)
     sell = broker.place_order("ABC", "stocks", "sell", 2.4, 1300)
     assert sell["status"] == "filled_simulated"
+
+
+def test_same_symbol_can_exist_in_multiple_markets(tmp_path):
+    broker = PaperBroker(str(tmp_path / "paper.db"))
+    broker.place_order("ABC", "stocks", "buy", 1, 100, 99)
+    broker.place_order("ABC", "crypto", "buy", 1, 100, 99)
+    positions = broker.portfolio()["positions"]
+    assert len(positions) == 2
+    assert {p["market"] for p in positions} == {"stocks", "crypto"}

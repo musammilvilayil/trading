@@ -139,13 +139,13 @@ class PaperBroker:
                                (symbol, market, quantity, execution_price + fee / quantity, reference_price, stop_loss, now))
                 db.execute("UPDATE account SET cash=cash-? WHERE id=1", (notional + fee,))
             else:
-                old = db.execute("SELECT * FROM positions WHERE symbol=?", (market, symbol)).fetchone()
+                old = db.execute("SELECT * FROM positions WHERE market=? AND symbol=?", (market, symbol)).fetchone()
                 if old is None or old["quantity"] + 1e-12 < quantity:
                     raise PaperTradeRejected("Insufficient paper position to sell.")
                 realized = (execution_price - old["average_price"]) * quantity - fee
                 remaining = old["quantity"] - quantity
                 if remaining <= 1e-12:
-                    db.execute("DELETE FROM positions WHERE symbol=?", (symbol,))
+                    db.execute("DELETE FROM positions WHERE market=? AND symbol=?", (symbol,))
                 else:
                     db.execute("UPDATE positions SET quantity=?,last_price=?,updated_at=? WHERE symbol=?",
                                (remaining, reference_price, now, market, symbol))
@@ -169,7 +169,7 @@ class PaperBroker:
             position = db.execute("SELECT * FROM positions WHERE symbol=?", (market, symbol.upper())).fetchone()
             if not position:
                 return {"symbol": symbol.upper(), "updated": False, "reason": "no_open_position"}
-            db.execute("UPDATE positions SET last_price=?,updated_at=? WHERE symbol=?",
+            db.execute("UPDATE positions SET last_price=?,updated_at=? WHERE market=? AND symbol=?",
                        (price, datetime.now(timezone.utc).isoformat(), market, symbol.upper()))
             stop = position["stop_loss"]
             should_exit = stop is not None and price <= stop
