@@ -99,6 +99,20 @@ function App() {
     } catch(e) { setError(e.message); } finally { setBacktestBusy(false); }
   }
 
+  async function closePosition(position) {
+    setError(''); setNotice('');
+    try {
+      const res = await fetch(API + '/api/paper/orders', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+        symbol:position.symbol, market:position.market, side:'sell',
+        quantity:Number(position.quantity), price_inr:Number(position.last_price)
+      })});
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.detail || 'Could not close paper position');
+      setNotice('Paper position closed: ' + body.id);
+      await refresh();
+    } catch(e) { setError(e.message); }
+  }
+
   async function placeOrder() {
     setOrderBusy(true); setError(''); setNotice('');
     try {
@@ -154,6 +168,9 @@ function App() {
           {backtest ? <div className="backtest-stats"><div><small>NET RETURN</small><b>{backtest.total_return_pct}%</b></div><div><small>MAX DRAWDOWN</small><b>{backtest.max_drawdown_pct}%</b></div><div><small>WIN RATE</small><b>{backtest.win_rate_pct}%</b></div><div><small>TRADES</small><b>{backtest.closed_trades}</b></div><p>{backtest.account_currency} quote currency · {backtest.execution_assumptions?.signal_execution} · fees/slippage included.</p></div> : <div className="empty"><FlaskConical size={22}/><b>No backtest run</b><span>Run a 2-year EMA crossover simulation above.</span></div>}
         </article>
       </div>
+      <article className="panel positions"><div className="panel-title"><div><span className="eyebrow">OPEN EXPOSURE</span><h2>Paper positions</h2></div><span className="tag">{dashboard?.positions?.length || 0} OPEN</span></div>
+        {dashboard?.positions?.length ? <div className="position-list">{dashboard.positions.map(p=><div className="position" key={p.symbol}><div><b>{p.symbol}</b><small>{p.market} · {p.quantity} units · stop {fmt(p.stop_loss)}</small></div><div><b>{fmt(p.last_price)}</b><small>Avg cost {fmt(p.average_price)}</small></div><button className="secondary" onClick={()=>closePosition(p)}>Close</button></div>)}</div> : <div className="empty"><Wallet size={22}/><b>No open positions</b><span>Paper holdings will appear here.</span></div>}
+      </article>
       <article className="panel orders"><div className="panel-title"><div><span className="eyebrow">ACTIVITY</span><h2>Recent paper orders</h2></div><span className="tag">SIMULATED</span></div>
         {dashboard?.recent_orders?.length ? <div className="order-list">{dashboard.recent_orders.map(o=><div className="order" key={o.id}><span className={'side '+o.side}>{o.side==='buy'?<ArrowUpRight size={15}/>:<ArrowDownRight size={15}/>}</span><b>{o.symbol}</b><span>{o.side.toUpperCase()}</span><span>{o.quantity} @ {o.price}</span><small>{o.status}</small></div>)}</div> : <div className="empty"><Activity size={22}/><b>No paper orders yet</b><span>Approved simulated orders will appear here.</span></div>}
       </article>
