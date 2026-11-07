@@ -46,7 +46,14 @@ function App() {
       if (!res.ok) throw new Error(body.detail || 'Analysis request failed');
       setAnalysis(body);
       const nativePrice = body.proposal?.entry ?? body.last_price;
-      if (nativePrice && body.instrument?.quote_currency === 'INR') setPriceInr(String(nativePrice));
+      if (body.entry_price_inr) {
+        setPriceInr(String(body.entry_price_inr));
+        const atr = Number(body.proposal?.atr || 0);
+        const entryInr = Number(body.entry_price_inr);
+        if (atr > 0) setStopInr(String(entryInr - Math.max(atr * Number(body.fx_to_inr || 1), entryInr * 0.002)));
+      } else if (nativePrice && body.instrument?.quote_currency === 'INR') {
+        setPriceInr(String(nativePrice));
+      }
     } catch (e) { setError(e.message); } finally { setLoading(false); }
   }
 
@@ -150,7 +157,7 @@ function App() {
       <article className="panel orders"><div className="panel-title"><div><span className="eyebrow">ACTIVITY</span><h2>Recent paper orders</h2></div><span className="tag">SIMULATED</span></div>
         {dashboard?.recent_orders?.length ? <div className="order-list">{dashboard.recent_orders.map(o=><div className="order" key={o.id}><span className={'side '+o.side}>{o.side==='buy'?<ArrowUpRight size={15}/>:<ArrowDownRight size={15}/>}</span><b>{o.symbol}</b><span>{o.side.toUpperCase()}</span><span>{o.quantity} @ {o.price}</span><small>{o.status}</small></div>)}</div> : <div className="empty"><Activity size={22}/><b>No paper orders yet</b><span>Approved simulated orders will appear here.</span></div>}
       </article>
-      <footer>ATLAS AI · Research and simulation only · Not investment advice</footer>
+      <footer>ATLAS AI · Historical provider data · FX converted to INR for paper risk sizing · Not investment advice</footer>
     </section>
   </main>;
 }
