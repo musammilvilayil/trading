@@ -102,7 +102,8 @@ class PaperBroker:
             db.execute("BEGIN IMMEDIATE")
             account = db.execute("SELECT * FROM account WHERE id=1").fetchone()
             equity = self._equity(db)
-            self._daily_guard(db, equity)
+            if side == "buy":
+                self._daily_guard(db, equity)
             if notional > account["initial_capital"] * 0.10:
                 raise PaperTradeRejected("Order exceeds 10% of initial paper capital.")
             realized = 0.0
@@ -117,12 +118,12 @@ class PaperBroker:
                 old = db.execute("SELECT * FROM positions WHERE symbol=?", (symbol,)).fetchone()
                 if old:
                     total = old["quantity"] + quantity
-                    avg = (old["quantity"] * old["average_price"] + quantity * execution_price) / total
+                    avg = (old["quantity"] * old["average_price"] + quantity * execution_price + fee) / total
                     db.execute("UPDATE positions SET quantity=?,average_price=?,last_price=?,stop_loss=?,updated_at=? WHERE symbol=?",
                                (total, avg, reference_price, stop_loss, now, symbol))
                 else:
                     db.execute("INSERT INTO positions VALUES(?,?,?,?,?,?,?)",
-                               (symbol, market, quantity, execution_price, reference_price, stop_loss, now))
+                               (symbol, market, quantity, execution_price + fee / quantity, reference_price, stop_loss, now))
                 db.execute("UPDATE account SET cash=cash-? WHERE id=1", (notional + fee,))
             else:
                 old = db.execute("SELECT * FROM positions WHERE symbol=?", (symbol,)).fetchone()
