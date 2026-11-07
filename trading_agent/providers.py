@@ -28,7 +28,11 @@ def resolve_instrument(symbol: str, market: str) -> Instrument:
 
     if market == "stocks":
         provider_symbol = raw if "." in raw else f"{raw}.NS"
-        quote = "INR" if provider_symbol.endswith((".NS", ".BO")) else "USD"
+        suffix_currency = {".NS": "INR", ".BO": "INR", ".L": "GBP",
+                           ".TO": "CAD", ".AX": "AUD", ".DE": "EUR",
+                           ".PA": "EUR", ".T": "JPY", ".HK": "HKD"}
+        quote = next((currency for suffix, currency in suffix_currency.items()
+                      if provider_symbol.endswith(suffix)), "USD")
     elif market == "crypto":
         provider_symbol = raw if "-" in raw else f"{raw}-USD"
         quote = provider_symbol.rsplit("-", 1)[-1]

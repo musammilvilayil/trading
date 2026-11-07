@@ -16,8 +16,8 @@ def build_paper_buy_plan(proposal: dict, equity_inr: float, cash_inr: float,
     risk_budget = equity_inr * 0.005
     max_order = initial_capital_inr * 0.10
     max_exposure = initial_capital_inr * 0.50
-    qty = min(risk_budget / stop_distance_inr, max_order / entry_inr,
-              cash_inr / (entry_inr * 1.001))
+    qty = min(risk_budget / stop_distance_inr, max_order / (entry_inr * 1.0005),
+              cash_inr / (entry_inr * 1.001501))
     if market == "stocks":
         qty = math.floor(qty)
     else:

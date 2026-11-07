@@ -46,10 +46,7 @@ class PaperAutomation:
         if self._stop_event:
             self._stop_event.set()
         if self._task and not self._task.done():
-            try:
-                await asyncio.wait_for(self._task, timeout=2)
-            except asyncio.TimeoutError:
-                self._task.cancel()
+            await self._task
         self._status["running"] = False
         return self.status()
 
