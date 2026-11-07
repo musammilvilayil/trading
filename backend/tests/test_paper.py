@@ -13,7 +13,7 @@ def test_paper_broker_persists_and_marks_to_market(tmp_path):
 def test_paper_broker_rejects_excessive_trade_risk(tmp_path):
     broker = PaperBroker(str(tmp_path / "paper.db"))
     with pytest.raises(PaperTradeRejected, match="0.5%"):
-        broker.place_order("BTC-USD", "crypto", "buy", 1, 100, 90)
+        broker.place_order("BTC-USD", "crypto", "buy", 20, 100, 90)
 
 
 def test_paper_broker_sell_calculates_realized_pnl(tmp_path):
