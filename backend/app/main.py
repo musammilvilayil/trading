@@ -197,10 +197,23 @@ def autonomous_paper_run(request: AnalyzeRequest):
         report = analyze_with_preserved_ml(request.symbol.upper(), request.market.value,
                                             paper_broker.portfolio()["equity"])
         proposal = report["proposal"]
-        if proposal["action"] != "BUY":
-            return {"status": "no_trade", "analysis": report,
-                    "reason": "No long entry signal; no order was submitted."}
+        price_inr = float(proposal["entry"]) * float(report["fx_to_inr"])
+        tick = paper_broker.process_price(request.symbol.upper(), request.market.value, price_inr)
+        if tick.get("stop_triggered"):
+            return {"status": "stop_loss_filled", "analysis": report, "order": tick["order"],
+                    "live_trading_enabled": False}
         snapshot = paper_broker.portfolio()
+        position = next((p for p in snapshot["positions"]
+                         if p["symbol"] == request.symbol.upper() and p["market"] == request.market.value), None)
+        if proposal["action"] == "SELL" and position:
+            order = paper_broker.place_order(request.symbol.upper(), request.market.value,
+                                             "sell", position["quantity"], price_inr,
+                                             reason="autonomous_ml_exit")
+            return {"status": "paper_position_closed", "analysis": report, "order": order,
+                    "live_trading_enabled": False}
+        if proposal["action"] != "BUY" or position:
+            return {"status": "no_trade", "analysis": report,
+                    "reason": "No new long entry; either the model did not signal BUY or a position is already open."}
         plan = build_paper_buy_plan(proposal, snapshot["equity"], snapshot["cash"],
                                     snapshot["capital"], report["fx_to_inr"], request.market.value)
         if not plan:
