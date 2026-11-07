@@ -145,9 +145,9 @@ class PaperBroker:
                 realized = (execution_price - old["average_price"]) * quantity - fee
                 remaining = old["quantity"] - quantity
                 if remaining <= 1e-12:
-                    db.execute("DELETE FROM positions WHERE market=? AND symbol=?", (symbol,))
+                    db.execute("DELETE FROM positions WHERE market=? AND symbol=?", (market, symbol))
                 else:
-                    db.execute("UPDATE positions SET quantity=?,last_price=?,updated_at=? WHERE symbol=?",
+                    db.execute("UPDATE positions SET quantity=?,last_price=?,updated_at=? WHERE market=? AND symbol=?",
                                (remaining, reference_price, now, market, symbol))
                 db.execute("UPDATE account SET cash=cash+?,realized_pnl=realized_pnl+? WHERE id=1",
                            (notional - fee, realized))
@@ -166,7 +166,7 @@ class PaperBroker:
             raise PaperTradeRejected("Price must be positive.")
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            position = db.execute("SELECT * FROM positions WHERE symbol=?", (market, symbol.upper())).fetchone()
+            position = db.execute("SELECT * FROM positions WHERE market=? AND symbol=?", (market, symbol.upper())).fetchone()
             if not position:
                 return {"symbol": symbol.upper(), "updated": False, "reason": "no_open_position"}
             db.execute("UPDATE positions SET last_price=?,updated_at=? WHERE market=? AND symbol=?",
