@@ -15,6 +15,7 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [useMl, setUseMl] = useState(true);
   const [autoBusy, setAutoBusy] = useState(false);
+  const [autoStatus, setAutoStatus] = useState(null);
   const [backtestBusy, setBacktestBusy] = useState(false);
   const [orderBusy, setOrderBusy] = useState(false);
   const [quantity, setQuantity] = useState('1');
@@ -26,9 +27,11 @@ function App() {
 
   async function refresh() {
     try {
-      const [d, h] = await Promise.all([fetch(API + '/api/dashboard'), fetch(API + '/api/health')]);
+      const [d, h, a] = await Promise.all([fetch(API + '/api/dashboard'), fetch(API + '/api/health'), fetch(API + '/api/automation/status')]);
       if (!d.ok || !h.ok) throw new Error('API unavailable');
-      setDashboard(await d.json()); setHealth(await h.json()); setError('');
+      setDashboard(await d.json()); setHealth(await h.json());
+      if (a.ok) setAutoStatus(await a.json());
+      setError('');
     } catch { setError('Backend unavailable. Start the FastAPI server on port 8000.'); }
   }
   useEffect(() => { refresh(); const id = setInterval(refresh, 12000); return () => clearInterval(id); }, []);
@@ -57,6 +60,26 @@ function App() {
       setNotice(body.status === 'paper_order_filled' ? 'AI agent submitted a risk-approved simulated paper order.' : body.reason || 'No trade was placed.');
       await refresh();
     } catch(e) { setError(e.message); } finally { setAutoBusy(false); }
+  }
+
+  async function startAutomation() {
+    setAutoBusy(true); setError(''); setNotice('');
+    try {
+      const res = await fetch(API + '/api/automation/start', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({watchlist:[{symbol,market}],interval_seconds:300})});
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.detail || 'Could not start autonomous worker');
+      setAutoStatus(body); setNotice('Autonomous paper worker started. It scans this instrument every 5 minutes while the API process remains running.');
+    } catch(e) { setError(e.message); } finally { setAutoBusy(false); await refresh(); }
+  }
+
+  async function stopAutomation() {
+    setAutoBusy(true); setError('');
+    try {
+      const res = await fetch(API + '/api/automation/stop', {method:'POST'});
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.detail || 'Could not stop worker');
+      setAutoStatus(body); setNotice('Autonomous paper worker stopped.');
+    } catch(e) { setError(e.message); } finally { setAutoBusy(false); await refresh(); }
   }
 
   async function runBacktest() {
@@ -105,11 +128,11 @@ function App() {
       <div className="section-head"><div><h2>Portfolio snapshot</h2><p>Starting virtual capital · {fmt(dashboard?.capital ?? 25000)}</p></div><span className="tag"><span className="pulse"/> {health?.status === 'ok' ? 'API connected' : 'Connecting'}</span></div>
       <div className="metrics">{metrics.map(({label,value,icon:Icon,detail})=><article className="metric" key={label}><div className="metric-top"><span>{label}</span><Icon size={17}/></div><strong>{value}</strong><small>{detail}</small></article>)}</div>
       <div className="grid">
-        <article className="panel analysis"><div className="panel-title"><div><span className="eyebrow">STRATEGY WORKBENCH</span><h2>AI market analysis</h2></div><span className="tag">HISTORICAL FEED</span></div>
-          <p className="muted">Choose a market and provider symbol. ML analysis uses historical Yahoo Finance candles where available.</p>
+        <article className="panel analysis"><div className="panel-title"><div><span className="eyebrow">STRATEGY WORKBENCH</span><h2>AI market analysis</h2></div><span className="tag">{autoStatus?.running ? 'AUTO SCANNING' : 'HISTORICAL FEED'}</span></div>
+          <p className="muted">Choose a market and provider symbol. ML analysis uses historical Yahoo Finance candles. Autonomous mode is paper-only and scans every 5 minutes.</p>
           <div className="controls"><select value={market} onChange={e=>setMarket(e.target.value)}><option value="stocks">Stocks</option><option value="crypto">Crypto</option><option value="forex">Forex</option><option value="commodities">Commodities</option></select><input value={symbol} onChange={e=>setSymbol(e.target.value.toUpperCase())} aria-label="Symbol"/><label className="ml-toggle"><input type="checkbox" checked={useMl} onChange={e=>setUseMl(e.target.checked)}/> V1 ML</label><button onClick={analyze} disabled={loading}>{loading?'Analysing…':'Analyse'}</button></div>
           {analysis && <div className="result"><div><small>MODEL SIGNAL</small><strong className={'signal '+signal}>{(signal || 'wait').toUpperCase()}</strong></div><div><small>CONFIDENCE</small><b>{confidence == null ? '—' : (confidence*100).toFixed(1)+'%'}</b></div><div><small>LAST / ENTRY</small><b>{lastPrice == null ? '—' : Number(lastPrice).toFixed(2)}</b></div><p>{analysis.disclaimer || analysis.data_source + ' · ' + analysis.data_mode}</p></div>}
-          <div className="action-row"><button onClick={runAutonomous} disabled={autoBusy}><Play size={14}/>{autoBusy?'Running agent…':'Run autonomous paper cycle'}</button><button className="secondary" onClick={runBacktest} disabled={backtestBusy}><FlaskConical size={14}/>{backtestBusy?'Testing…':'Backtest 2 years'}</button></div>
+          <div className="action-row"><button onClick={runAutonomous} disabled={autoBusy}><Play size={14}/>{autoBusy?'Running agent…':'Run one AI cycle'}</button><button className="secondary" onClick={autoStatus?.running ? stopAutomation : startAutomation} disabled={autoBusy}>{autoStatus?.running ? 'Stop autonomous' : 'Start autonomous'}</button><button className="secondary" onClick={runBacktest} disabled={backtestBusy}><FlaskConical size={14}/>{backtestBusy?'Testing…':'Backtest 2 years'}</button></div>
         </article>
         <article className="panel agents"><div className="panel-title"><div><span className="eyebrow">AUTOMATION LAYER</span><h2>Agent status</h2></div><Cpu size={19}/></div>
           {[['Market research','Yahoo Finance historical adapter','active'],['ML strategy','HistGradientBoosting + EMA/VWAP','active'],['Risk manager','0.5% trade risk / 2% daily guard','active'],['Paper broker','SQLite ledger + simulated fills','active'],['Live execution','Not implemented / disabled','locked']].map(([a,b,c])=><div className="agent-row" key={a}><span className="agent-dot"/><div><b>{a}</b><small>{b}</small></div><span className={'agent-state '+c}>{c}</span></div>)}
