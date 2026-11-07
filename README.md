@@ -1,42 +1,61 @@
-# AI Trading Agent — V1
+# Atlas — Multi-market AI Trading Platform
 
-A paper-trading-first intraday AI agent for research and experimentation. The design separates probabilistic market decisions from deterministic risk controls.
+A personal AI trading research and simulation workspace, built on the original AI Trading Agent V1 rather than replacing it.
 
-## Architecture
+## Preserved V1 engine
+The existing `trading_agent/` package remains intact: 5-minute OHLCV feature engineering, HistGradientBoosting probability model, EMA/VWAP confirmation, deterministic risk sizing, NSE data pipeline, candle validation/gap detection, CLI runner and tests. The original V1 configuration starts with ₹25,000 and caps risk per trade and daily drawdown.
 
-`Market data -> Feature engine -> ML agent -> Trade proposal -> Hard risk engine -> Paper execution`
+## Added platform foundation
+- FastAPI service and React/Vite dashboard.
+- Portfolio and simulated order API.
+- Strategy workbench and multi-market instrument selection.
+- Configurable paper capital (default ₹25,000).
+- Docker Compose and CI workflows.
+- Explicitly disabled live trading.
 
-The current model uses 5-minute OHLCV data, EMA 9/21, RSI-14, ATR-14, VWAP, volume z-score and short-term returns. A HistGradientBoosting classifier estimates the probability of the next bar closing higher. EMA/VWAP confirmation filters the model output.
+## Markets and data adapters
+The dashboard supports stocks, crypto, forex and commodities as market categories. The sample provider is labelled MOCK and must not be mistaken for a quote. The preserved ML engine uses Yahoo Finance via `yfinance`; it is a research data source, not an execution-grade feed. For multi-market analysis, use provider-native symbols such as `RELIANCE.NS`, `BTC-USD`, `EURUSD=X`, or `GC=F` where Yahoo Finance supports them. Availability, delays, history and instrument mappings vary by market.
 
-The risk engine is deliberately outside the ML model. Default experimental settings for a ₹25,000 account cap position exposure at ₹3,000, risk budget at 0.5% equity per trade, daily loss at 2%, and require 62% model confidence. These limits reduce exposure; they do not guarantee safety or profit.
-
-## Setup
-
+## Run locally
+### Original ML agent
 ```bash
 python -m venv .venv
-# Windows
-.venv\Scripts\activate
+# activate, then:
 pip install -r requirements.txt
-copy .env.example .env
 python main.py
 pytest -q
 ```
 
-Default symbol: `RELIANCE.NS`. Change the symbol passed to `run()` to test another Yahoo Finance NSE ticker.
+### API
+```bash
+pip install -r backend/requirements.txt
+uvicorn app.main:app --app-dir backend --reload --port 8000
+```
 
-## Safety status
+### Frontend
+```bash
+cd frontend && npm install && npm run dev
+```
 
-**Paper trading only.** Live broker order placement is intentionally disabled in V1. Do not enable real-money execution until the system has been evaluated with point-in-time historical data, transaction costs/slippage, out-of-sample walk-forward testing, and a meaningful live paper-trading period.
+### Docker
+```bash
+docker compose up --build
+```
 
-## Next milestones
+## API endpoints
+- `GET /api/health`, `GET /api/dashboard`, `GET /api/markets`
+- `GET /api/market/{symbol}/candles`
+- `POST /api/analyze` — illustrative analysis on MOCK candles
+- `POST /api/analyze/ml` — historical Yahoo Finance data + preserved V1 model/risk engine
+- `POST /api/paper/orders`, `GET /api/paper/portfolio`
 
-- Event-driven paper broker with positions, stop/target simulation and trade journal
-- Walk-forward backtester with brokerage/slippage and drawdown metrics
-- Multi-symbol NSE scanner
-- Persistent model artifacts and scheduled retraining
-- Optional multi-agent research layer inspired by TradingAgents
-- Broker adapter only after validation, with kill switch and hard account limits
+## Safety
+This repository is paper-trading-first. Live broker execution is not implemented or enabled. The dashboard's mock-data analysis is illustrative. ML results are historical-data research signals, not guaranteed forecasts. Before any real-money integration, add point-in-time backtesting, costs/slippage, out-of-sample walk-forward validation, provider reliability checks, persistent order reconciliation, kill-switches, broker sandbox testing and a legal/regulatory review. Do not treat a model signal as a recommendation to buy or sell.
 
-## Disclaimer
-
-For software research/education. Trading involves risk and model predictions can fail, especially under changing market regimes.
+## Next engineering milestones
+1. Persist orders, positions, candles and model versions in PostgreSQL/TimescaleDB.
+2. Build event-driven paper broker with stop/target simulation and trade journal.
+3. Add multi-market provider adapters and normalized instrument master.
+4. Implement realistic backtesting with fees, slippage, latency and walk-forward evaluation.
+5. Add model registry, scheduled retraining, monitoring and alerting.
+6. Only after validation, assess broker sandbox and compliant live-order integration.
