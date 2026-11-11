@@ -33,15 +33,17 @@ function App() {
   const [dhanSecurityId, setDhanSecurityId] = useState('');
   const [dhanSegment, setDhanSegment] = useState('NSE_EQ');
   const [dhanBusy, setDhanBusy] = useState(false);
+  const [dailyReport, setDailyReport] = useState(null);
 
   async function refresh() {
     try {
-      const [d, h, a, g, df] = await Promise.all([fetch(API + '/api/dashboard'), fetch(API + '/api/health'), fetch(API + '/api/automation/status'), fetch(API + '/api/ai/status'), fetch(API + '/api/market/dhan/status')]);
+      const [d, h, a, g, df, dr] = await Promise.all([fetch(API + '/api/dashboard'), fetch(API + '/api/health'), fetch(API + '/api/automation/status'), fetch(API + '/api/ai/status'), fetch(API + '/api/market/dhan/status'), fetch(API + '/api/reports/daily')]);
       if (!d.ok || !h.ok) throw new Error('API unavailable');
       setDashboard(await d.json()); setHealth(await h.json());
       if (a.ok) setAutoStatus(await a.json());
       if (g.ok) setGeminiStatus(await g.json());
       if (df.ok) setDhanStatus(await df.json());
+      if (dr.ok) setDailyReport(await dr.json());
       setError('');
     } catch { setError('Backend unavailable. Start the FastAPI server on port 8000.'); }
   }
@@ -213,6 +215,18 @@ function App() {
       {notice && <div className="notice">{notice}</div>}
       <div className="section-head"><div><h2>Portfolio snapshot</h2><p>Starting virtual capital · {fmt(dashboard?.capital ?? 25000)}</p></div><span className="tag"><span className="pulse"/> {health?.status === 'ok' ? 'API connected' : 'Connecting'}</span></div>
       <div className="metrics">{metrics.map(({label,value,icon:Icon,detail})=><article className="metric" key={label}><div className="metric-top"><span>{label}</span><Icon size={17}/></div><strong>{value}</strong><small>{detail}</small></article>)}</div>
+      <article className="panel daily-report">
+        <div className="panel-title"><div><span className="eyebrow">TRADING JOURNAL</span><h2>Today's performance</h2></div><Activity size={19}/></div>
+        {dailyReport ? <div className="daily-stats">
+          <div><small>DAILY P&amp;L</small><b className={dailyReport.daily_pnl >= 0 ? 'positive' : 'negative'}>{fmt(dailyReport.daily_pnl)}</b></div>
+          <div><small>REALIZED P&amp;L</small><b>{fmt(dailyReport.realized_pnl)}</b></div>
+          <div><small>WIN RATE</small><b>{dailyReport.win_rate_pct == null ? '—' : dailyReport.win_rate_pct+'%'}</b></div>
+          <div><small>ENTRIES</small><b>{dailyReport.entries} / 5</b></div>
+          <div><small>CLOSED TRADES</small><b>{dailyReport.closed_trades}</b></div>
+          <div><small>PROFIT FACTOR</small><b>{dailyReport.profit_factor == null ? '—' : dailyReport.profit_factor}</b></div>
+          <p>IST trading day · {dailyReport.wins} wins / {dailyReport.losses} losses · Paper account only</p>
+        </div> : <div className="empty"><Activity size={20}/><b>No daily report</b></div>}
+      </article>
       <div className="grid">
         <article className="panel analysis"><div className="panel-title"><div><span className="eyebrow">STRATEGY WORKBENCH</span><h2>AI market analysis</h2></div><span className="tag">{autoStatus?.running ? 'AUTO SCANNING' : 'HISTORICAL FEED'}</span></div>
           <p className="muted">Choose a market and symbol. Manual research uses Yahoo Finance history; autonomous NSE/BSE cash-equity mode uses Dhan 5-minute history plus a fresh Dhan live quote. Execution remains paper-only.</p>
