@@ -6,7 +6,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from .core import Market, Side, settings, market_data, strategy_engine
-from .ml_adapter import analyze_with_preserved_ml
+from .ml_adapter import analyze_with_preserved_ml, analyze_with_dhan_history
 from .paper import PaperBroker, PaperTradeRejected
 from .automation import PaperAutomation
 from trading_agent.providers import fetch_market_candles, quote_to_inr_rate
@@ -55,7 +55,11 @@ def require_fresh_dhan_tick(symbol: str, market: str):
 def analyze_for_autonomous_intraday(symbol: str, market: str, equity: float):
     """Train/evaluate on history, but require a fresh Dhan quote for execution price."""
     tick, age_seconds = require_fresh_dhan_tick(symbol, market)
-    report = analyze_with_preserved_ml(symbol, market, equity)
+    report = analyze_with_dhan_history(
+        symbol, market, equity,
+        security_id=tick["security_id"],
+        exchange_segment=tick["exchange_segment"],
+    )
     fx_rate = float(report["fx_to_inr"])
     if fx_rate <= 0:
         raise ValueError("Invalid INR conversion rate.")
