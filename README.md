@@ -8,6 +8,7 @@ Personal AI research and **autonomous paper-trading** workspace, built on top of
 - Multi-market historical data adapters for stocks, crypto, forex and commodities through Yahoo Finance (`yfinance`) where symbols and intervals are supported.
 - FX conversion to INR using recent provider FX closes, with fail-closed behavior when a conversion is unavailable.
 - FastAPI backend and responsive React/Vite dashboard.
+- Optional Google Gemini market-intelligence layer: structured market briefs, technical interpretation, balanced bull/bear scenarios, risk notes and sentiment classification for explicitly supplied headlines.
 - SQLite paper ledger with persistent account, average-cost accounting, realized/unrealized P&L, simulated fees/slippage, order journal and stop-loss monitoring.
 - Deterministic risk limits: 0.5% equity risk per trade, 2% daily drawdown guard, 10% initial-capital buy-order cap and 50% gross exposure cap.
 - EMA crossover historical backtest with next-candle-open execution, fees, slippage, drawdown, Sharpe and win-rate reporting.
@@ -23,6 +24,8 @@ Personal AI research and **autonomous paper-trading** workspace, built on top of
 - The autonomous worker runs inside the API process and stops when that process restarts. It is opt-in and paper-only.
 - Yahoo Finance is a historical/research data source, not a guaranteed real-time feed or broker execution feed. Symbol coverage, intervals, delays and availability vary.
 - Backtests are simulations, not proof of profitability. The included EMA backtest is a baseline, not the ML agent's walk-forward performance report.
+- Gemini is an advisory-only layer. Its output is never passed to the autonomous paper worker, risk engine or order executor; the quantitative ML engine remains independent.
+- Gemini does not fetch live market news in this integration. Sentiment is marked `not_assessed` unless the caller explicitly supplies headlines; supplied headlines are treated as untrusted text.
 - No real broker credentials, live order endpoints or live execution switch are provided. Broker sandbox/live trading must remain a separate, reviewed milestone after independent validation, reconciliation, security review and regulatory assessment.
 
 ## Run locally
@@ -33,9 +36,17 @@ python -m venv .venv
 # activate environment
 pip install -r requirements.txt
 pip install -r backend/requirements.txt
-uvicorn app.main:app --app-dir backend --reload --port 8000
+uvicorn app.main:app --app-dir backend --reload --port 8000 --env-file .env
 ```
 API docs: http://localhost:8000/docs
+
+### Optional Gemini setup
+1. Create an API key in [Google AI Studio](https://aistudio.google.com/apikey).
+2. Copy `.env.example` to `.env` and set `GEMINI_API_KEY` locally. Never commit the key or expose it in the Vite frontend.
+3. Optionally set `GEMINI_MODEL` (default: `gemini-3.8-flash`). Restart the backend after changing environment variables.
+4. Check `GET /api/ai/status`, then call `POST /api/ai/market-brief` or use **Generate brief** in the dashboard.
+
+Without a key, Atlas continues to run its existing ML and paper-trading features; only the Gemini brief is disabled. Docker Compose forwards the key from the local environment into the API container.
 
 ### Frontend
 ```bash
@@ -67,7 +78,7 @@ The SQLite ledger persists in the named `atlas_data` volume.
 | GET | `/api/paper/portfolio` | Paper account and positions |
 | POST | `/api/paper/orders` | Simulated INR-denominated order |
 | POST | `/api/paper/market-tick` | Mark position and check stop-loss |
-| GET | `/api/automation/status` | Autonomous worker status |
+| GET | `/api/ai/status` | Gemini configuration status (never returns the key) |\n| POST | `/api/ai/market-brief` | Gemini advisory market brief from supplied ML analysis and optional headlines |\n| GET | `/api/automation/status` | Autonomous worker status |
 | POST | `/api/automation/start` | Start paper-only autonomous scanning |
 | POST | `/api/automation/stop` | Stop autonomous scanning |
 | POST | `/api/automation/run-once` | Run one AI-to-paper cycle |
