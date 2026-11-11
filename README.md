@@ -43,6 +43,14 @@ uvicorn app.main:app --app-dir backend --reload --port 8000 --env-file .env
 ```
 API docs: http://localhost:8000/docs
 
+### Optional Telegram daily report
+
+1. Create a Telegram bot using BotFather and obtain its bot token.
+2. Obtain the target chat ID and add `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` to the backend local `.env`.
+3. Use the dashboard's **Send daily report** action or call `POST /api/reports/daily/telegram`.
+
+The Telegram token is backend-only and is never returned by the status endpoint. This release supports manual report delivery; automatic scheduled delivery is not yet enabled.
+
 ### Optional DhanHQ live market-data setup
 
 1. Use a Dhan account and create/enable DhanHQ Trading & Data API access in the Dhan web platform.
@@ -93,6 +101,8 @@ The SQLite ledger persists in the named `atlas_data` volume.
 | POST | `/api/backtest/ml` | Expanding-window out-of-sample ML metrics |
 | GET | `/api/paper/portfolio` | Paper account and positions |
 | GET | `/api/reports/daily` | IST daily P&L, win rate, profit factor and journal summary |
+| GET | `/api/notifications/telegram/status` | Telegram configuration status, without secrets |
+| POST | `/api/reports/daily/telegram` | Send the daily paper report to the configured Telegram chat |
 | POST | `/api/paper/orders` | Simulated INR-denominated order |
 | GET | `/api/risk/policy` | Active deterministic risk and exit policy |
 | POST | `/api/paper/market-tick` | Mark position and run protective exit manager |
