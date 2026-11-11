@@ -14,7 +14,7 @@ def test_vwap_resets_for_each_utc_session():
         "High": close + 0.5,
         "Low": close - 0.5,
         "Close": close,
-        "Volume": np.full(50, 1000.0),
+        "Volume": 1000.0 + (np.arange(50) % 7) * 100.0,
     }, index=index)
 
     result = features(frame)
