@@ -20,9 +20,9 @@ Personal AI research and **autonomous paper-trading** workspace, built on top of
 
 ## Safety and limitations
 
-- The account and all paper ledger values are INR-denominated. Manual paper orders and mark-price requests must use INR-converted prices.
+- The account and all paper ledger values are INR-denominated. Manual paper orders and mark-price requests must use INR-converted prices. Estimated stop risk includes entry/exit fees and slippage assumptions.
 - Autonomous scans can analyse all supported quote currencies; execution sizing converts quote prices and ATR into INR. If provider FX conversion is unavailable, that instrument's scan fails closed.
-- The autonomous worker runs inside the API process and stops when that process restarts. It is opt-in and paper-only.
+- The autonomous worker runs inside the API process and stops when that process restarts. It is opt-in and paper-only. The ML confidence gate is configurable and must not be interpreted as a calibrated probability of profit.
 - Yahoo Finance is a historical/research data source, not a guaranteed real-time feed or broker execution feed. Symbol coverage, intervals, delays and availability vary.
 - Backtests are simulations, not proof of profitability. The included EMA backtest is a baseline, not the ML agent's walk-forward performance report.
 - Gemini is an advisory-only layer. Its output is never passed to the autonomous paper worker, risk engine or order executor; the quantitative ML engine remains independent.
