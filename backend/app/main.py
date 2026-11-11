@@ -1,3 +1,6 @@
+import asyncio
+import json
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -9,6 +12,8 @@ from trading_agent.providers import fetch_market_candles, quote_to_inr_rate
 from trading_agent.backtest import BacktestConfig, run_ema_backtest, evaluate_ml_walk_forward
 from trading_agent.market import features
 from .execution import build_paper_buy_plan
+from .gemini import (GeminiNotConfiguredError, GeminiProviderError,
+                     generate_market_brief, get_gemini_status)
 
 paper_broker = PaperBroker(initial_capital=settings.starting_capital)
 automation_service = PaperAutomation(paper_broker, analyze_with_preserved_ml)
@@ -45,6 +50,13 @@ class BacktestRequest(BaseModel):
     market: Market
     period: str = "2y"
     interval: str = "1d"
+
+
+class GeminiBriefRequest(BaseModel):
+    symbol: str = Field(min_length=2, max_length=24)
+    market: Market
+    analysis: dict | None = None
+    news_context: list[str] = Field(default_factory=list, max_length=8)
 
 
 @app.get("/")
@@ -187,6 +199,37 @@ def ml_walk_forward_backtest(request: AnalyzeRequest):
         return result
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"ML walk-forward evaluation unavailable: {exc}") from exc
+
+@app.get("/api/ai/status")
+def ai_status():
+    return get_gemini_status()
+
+
+@app.post("/api/ai/market-brief")
+async def ai_market_brief(request: GeminiBriefRequest):
+    if not get_gemini_status()["configured"]:
+        raise HTTPException(status_code=503, detail="Gemini is not configured. Add GEMINI_API_KEY to the backend environment.")
+    analysis = request.analysis
+    if analysis is None:
+        try:
+            analysis = await asyncio.to_thread(
+                analyze_with_preserved_ml, request.symbol.upper(), request.market.value,
+                paper_broker.portfolio()["equity"]
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=422, detail=f"Quantitative analysis unavailable: {exc}") from exc
+    if len(json.dumps(analysis, default=str)) > 12000:
+        raise HTTPException(status_code=413, detail="Analysis payload is too large for a market brief.")
+    try:
+        return await asyncio.to_thread(
+            generate_market_brief, request.symbol.upper(), request.market.value,
+            analysis, request.news_context
+        )
+    except GeminiNotConfiguredError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except GeminiProviderError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
 
 @app.get("/api/automation/status")
 def automation_status():
