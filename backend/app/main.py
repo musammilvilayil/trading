@@ -1,6 +1,7 @@
 import asyncio
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timezone, time as dt_time
+from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -39,7 +40,14 @@ async def _monitor_paper_positions_from_dhan(tick: dict):
 dhan_feed_service = DhanFeedService(on_tick=_monitor_paper_positions_from_dhan)
 
 
+def is_nse_regular_session(now: datetime | None = None) -> bool:
+    local = (now or datetime.now(ZoneInfo("Asia/Kolkata"))).astimezone(ZoneInfo("Asia/Kolkata"))
+    return local.weekday() < 5 and dt_time(9, 15) <= local.time() <= dt_time(15, 30)
+
+
 def require_fresh_dhan_tick(symbol: str, market: str):
+    if not is_nse_regular_session():
+        raise ValueError("NSE/BSE autonomous mode is available only during the weekday 09:15–15:30 IST session.")
     if market != Market.stocks.value:
         raise ValueError("Autonomous intraday execution currently supports mapped NSE/BSE cash equities only.")
     tick = dhan_feed_service.latest_tick(symbol, market)
