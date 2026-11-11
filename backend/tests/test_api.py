@@ -41,6 +41,7 @@ def test_dhan_feed_status_is_safe_and_does_not_expose_credentials():
 def test_autonomous_worker_refuses_to_start_without_fresh_dhan_quote(monkeypatch):
     from app import main
 
+    monkeypatch.setattr(main, "is_nse_regular_session", lambda: True)
     monkeypatch.setattr(main.dhan_feed_service, "latest_tick", lambda *args: None)
     response = client.post(
         "/api/automation/start",
@@ -60,6 +61,20 @@ def test_autonomous_intraday_rejects_stale_dhan_tick(monkeypatch):
     stale = {
         "received_at": (datetime.now(timezone.utc) - timedelta(seconds=20)).isoformat()
     }
+    monkeypatch.setattr(main, "is_nse_regular_session", lambda: True)
     monkeypatch.setattr(main.dhan_feed_service, "latest_tick", lambda *args: stale)
     with pytest.raises(ValueError, match="stale"):
         main.require_fresh_dhan_tick("RELIANCE", "stocks")
+
+
+def test_nse_regular_session_window_uses_ist_and_weekdays():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from app.main import is_nse_regular_session
+
+    ist = ZoneInfo("Asia/Kolkata")
+    assert is_nse_regular_session(datetime(2026, 11, 11, 9, 15, tzinfo=ist))
+    assert is_nse_regular_session(datetime(2026, 11, 11, 15, 30, tzinfo=ist))
+    assert not is_nse_regular_session(datetime(2026, 11, 11, 9, 14, tzinfo=ist))
+    assert not is_nse_regular_session(datetime(2026, 11, 11, 15, 31, tzinfo=ist))
+    assert not is_nse_regular_session(datetime(2026, 11, 14, 12, 0, tzinfo=ist))
