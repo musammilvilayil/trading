@@ -34,16 +34,19 @@ function App() {
   const [dhanSegment, setDhanSegment] = useState('NSE_EQ');
   const [dhanBusy, setDhanBusy] = useState(false);
   const [dailyReport, setDailyReport] = useState(null);
+  const [telegramStatus, setTelegramStatus] = useState(null);
+  const [telegramBusy, setTelegramBusy] = useState(false);
 
   async function refresh() {
     try {
-      const [d, h, a, g, df, dr] = await Promise.all([fetch(API + '/api/dashboard'), fetch(API + '/api/health'), fetch(API + '/api/automation/status'), fetch(API + '/api/ai/status'), fetch(API + '/api/market/dhan/status'), fetch(API + '/api/reports/daily')]);
+      const [d, h, a, g, df, dr, ts] = await Promise.all([fetch(API + '/api/dashboard'), fetch(API + '/api/health'), fetch(API + '/api/automation/status'), fetch(API + '/api/ai/status'), fetch(API + '/api/market/dhan/status'), fetch(API + '/api/reports/daily'), fetch(API + '/api/notifications/telegram/status')]);
       if (!d.ok || !h.ok) throw new Error('API unavailable');
       setDashboard(await d.json()); setHealth(await h.json());
       if (a.ok) setAutoStatus(await a.json());
       if (g.ok) setGeminiStatus(await g.json());
       if (df.ok) setDhanStatus(await df.json());
       if (dr.ok) setDailyReport(await dr.json());
+      if (ts.ok) setTelegramStatus(await ts.json());
       setError('');
     } catch { setError('Backend unavailable. Start the FastAPI server on port 8000.'); }
   }
@@ -98,6 +101,17 @@ function App() {
       setNotice('Dhan live market feed stopped.');
     } catch(e) { setError(e.message); }
     finally { setDhanBusy(false); await refresh(); }
+  }
+
+  async function sendDailyTelegram() {
+    setTelegramBusy(true); setError(''); setNotice('');
+    try {
+      const res = await fetch(API + '/api/reports/daily/telegram', {method:'POST'});
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.detail || 'Telegram report delivery failed');
+      setNotice('Daily paper report sent to Telegram.');
+    } catch(e) { setError(e.message); }
+    finally { setTelegramBusy(false); }
   }
 
   async function runGeminiBrief() {
@@ -216,7 +230,7 @@ function App() {
       <div className="section-head"><div><h2>Portfolio snapshot</h2><p>Starting virtual capital · {fmt(dashboard?.capital ?? 25000)}</p></div><span className="tag"><span className="pulse"/> {health?.status === 'ok' ? 'API connected' : 'Connecting'}</span></div>
       <div className="metrics">{metrics.map(({label,value,icon:Icon,detail})=><article className="metric" key={label}><div className="metric-top"><span>{label}</span><Icon size={17}/></div><strong>{value}</strong><small>{detail}</small></article>)}</div>
       <article className="panel daily-report">
-        <div className="panel-title"><div><span className="eyebrow">TRADING JOURNAL</span><h2>Today's performance</h2></div><Activity size={19}/></div>
+        <div className="panel-title"><div><span className="eyebrow">TRADING JOURNAL</span><h2>Today's performance</h2></div><button className="secondary report-send" onClick={sendDailyTelegram} disabled={telegramBusy || !telegramStatus?.configured}>{telegramBusy ? 'Sending…' : 'Send daily report'}</button></div>
         {dailyReport ? <div className="daily-stats">
           <div><small>DAILY P&amp;L</small><b className={dailyReport.daily_pnl >= 0 ? 'positive' : 'negative'}>{fmt(dailyReport.daily_pnl)}</b></div>
           <div><small>REALIZED P&amp;L</small><b>{fmt(dailyReport.realized_pnl)}</b></div>
@@ -224,7 +238,7 @@ function App() {
           <div><small>ENTRIES</small><b>{dailyReport.entries} / 5</b></div>
           <div><small>CLOSED TRADES</small><b>{dailyReport.closed_trades}</b></div>
           <div><small>PROFIT FACTOR</small><b>{dailyReport.profit_factor == null ? '—' : dailyReport.profit_factor}</b></div>
-          <p>IST trading day · {dailyReport.wins} wins / {dailyReport.losses} losses · Paper account only</p>
+          <p>IST trading day · {dailyReport.wins} wins / {dailyReport.losses} losses · Paper account only · {telegramStatus?.configured ? 'Telegram ready' : 'Telegram not configured'}</p>
         </div> : <div className="empty"><Activity size={20}/><b>No daily report</b></div>}
       </article>
       <div className="grid">
