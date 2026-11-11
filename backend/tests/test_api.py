@@ -27,3 +27,12 @@ def test_automation_status_is_paper_only():
     response = client.get("/api/automation/status")
     assert response.status_code == 200
     assert response.json()["execution_mode"] == "paper_only"
+
+
+def test_dhan_feed_status_is_safe_and_does_not_expose_credentials():
+    response = client.get("/api/market/dhan/status")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["provider"] == "DhanHQ v2"
+    assert body["live_order_execution_enabled"] is False
+    assert "access_token" not in body
