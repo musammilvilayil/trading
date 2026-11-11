@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Activity, ArrowDownRight, ArrowUpRight, Bot, CandlestickChart, CircleDollarSign, Cpu, Gauge, Layers3, Play, RefreshCw, ShieldCheck, Wallet, FlaskConical } from 'lucide-react';
+import { Activity, ArrowDownRight, ArrowUpRight, Bot, CandlestickChart, CircleDollarSign, Cpu, Gauge, Layers3, Play, RefreshCw, ShieldCheck, Wallet, FlaskConical, BrainCircuit, Sparkles } from 'lucide-react';
 import './styles.css';
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:8000';
@@ -26,13 +26,17 @@ function App() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [health, setHealth] = useState(null);
+  const [geminiStatus, setGeminiStatus] = useState(null);
+  const [geminiBrief, setGeminiBrief] = useState(null);
+  const [geminiBusy, setGeminiBusy] = useState(false);
 
   async function refresh() {
     try {
-      const [d, h, a] = await Promise.all([fetch(API + '/api/dashboard'), fetch(API + '/api/health'), fetch(API + '/api/automation/status')]);
+      const [d, h, a, g] = await Promise.all([fetch(API + '/api/dashboard'), fetch(API + '/api/health'), fetch(API + '/api/automation/status'), fetch(API + '/api/ai/status')]);
       if (!d.ok || !h.ok) throw new Error('API unavailable');
       setDashboard(await d.json()); setHealth(await h.json());
       if (a.ok) setAutoStatus(await a.json());
+      if (g.ok) setGeminiStatus(await g.json());
       setError('');
     } catch { setError('Backend unavailable. Start the FastAPI server on port 8000.'); }
   }
@@ -57,6 +61,20 @@ function App() {
         setPriceInr(String(nativePrice));
       }
     } catch (e) { setError(e.message); } finally { setLoading(false); }
+  }
+
+  async function runGeminiBrief() {
+    setGeminiBusy(true); setError(''); setNotice('');
+    try {
+      const res = await fetch(API + '/api/ai/market-brief', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({symbol, market, analysis, news_context:[]})
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.detail || 'Gemini market brief failed');
+      setGeminiBrief(body);
+    } catch(e) { setError(e.message); }
+    finally { setGeminiBusy(false); }
   }
 
   async function runAutonomous() {
@@ -171,6 +189,17 @@ function App() {
           {[['Market research','Yahoo Finance historical adapter','active'],['ML strategy','HistGradientBoosting + EMA/VWAP','active'],['Risk manager','0.5% trade risk / 2% daily guard','active'],['Paper broker','SQLite ledger + simulated fills','active'],['Live execution','Not implemented / disabled','locked']].map(([a,b,c])=><div className="agent-row" key={a}><span className="agent-dot"/><div><b>{a}</b><small>{b}</small></div><span className={'agent-state '+c}>{c}</span></div>)}
         </article>
       </div>
+      <article className="panel gemini-panel">
+        <div className="panel-title"><div><span className="eyebrow">GENERATIVE AI INTELLIGENCE</span><h2>Gemini market brief</h2></div><BrainCircuit size={19}/></div>
+        <div className="gemini-toolbar"><p className="muted">{geminiStatus?.configured ? 'Gemini is connected. Generate an advisory explanation of the selected instrument and quantitative ML output.' : 'Gemini API key is not configured. Add GEMINI_API_KEY to the backend environment to enable this panel.'}</p><button onClick={runGeminiBrief} disabled={geminiBusy || !geminiStatus?.configured}><Sparkles size={14}/>{geminiBusy ? 'Thinking…' : 'Generate brief'}</button></div>
+        {geminiBrief?.brief && <div className="gemini-content">
+          <div className="gemini-summary"><div><small>OVERALL BIAS</small><b className={'bias '+geminiBrief.brief.overall_bias}>{geminiBrief.brief.overall_bias.toUpperCase()}</b></div><div><small>CONFIDENCE</small><b>{geminiBrief.brief.confidence.toUpperCase()}</b></div><div><small>NEWS SENTIMENT</small><b>{geminiBrief.brief.news_sentiment.replaceAll('_',' ').toUpperCase()}</b></div><div><small>ML ALIGNMENT</small><b>{geminiBrief.brief.signal_alignment.replaceAll('_',' ').toUpperCase()}</b></div></div>
+          <p>{geminiBrief.brief.summary}</p><h3>Technical interpretation</h3><p>{geminiBrief.brief.technical_interpretation}</p>
+          <div className="gemini-columns"><div><h3>Key factors</h3><ul>{geminiBrief.brief.key_factors.map((x,i)=><li key={i}>{x}</li>)}</ul></div><div><h3>Risks</h3><ul>{geminiBrief.brief.risks.map((x,i)=><li key={i}>{x}</li>)}</ul></div><div><h3>Bull case</h3><p>{geminiBrief.brief.bull_case}</p></div><div><h3>Bear case</h3><p>{geminiBrief.brief.bear_case}</p></div></div>
+          <small className="gemini-disclaimer">{geminiBrief.disclaimer} · {geminiBrief.model}</small>
+        </div>}
+        {!geminiBrief && <div className="empty"><BrainCircuit size={22}/><b>No Gemini brief generated</b><span>Gemini explains supplied analysis; it does not place or approve trades.</span></div>}
+      </article>
       <div className="grid">
         <article className="panel"><div className="panel-title"><div><span className="eyebrow">PAPER EXECUTION</span><h2>Place simulated buy</h2></div><Wallet size={18}/></div>
           <p className="muted">Price and stop must be entered in INR. For non-INR instruments, convert the quote price before placing a paper order.</p>
