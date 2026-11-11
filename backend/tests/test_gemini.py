@@ -1,7 +1,5 @@
 import pytest
-from fastapi.testclient import TestClient
 
-from app.main import app
 from app.gemini import (
     GeminiMarketBrief,
     GeminiNotConfiguredError,
@@ -28,6 +26,10 @@ def test_gemini_is_optional_when_key_is_missing(monkeypatch):
 
 
 def test_ai_status_and_market_brief_are_safe_without_api_key(monkeypatch):
+    pytest.importorskip('fastapi')
+    from fastapi.testclient import TestClient
+    from app.main import app
+
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     client = TestClient(app)
 
