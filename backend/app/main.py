@@ -39,8 +39,7 @@ async def _monitor_paper_positions_from_dhan(tick: dict):
 dhan_feed_service = DhanFeedService(on_tick=_monitor_paper_positions_from_dhan)
 
 
-def analyze_for_autonomous_intraday(symbol: str, market: str, equity: float):
-    """Train/evaluate on history, but require a fresh Dhan quote for execution price."""
+def require_fresh_dhan_tick(symbol: str, market: str):
     if market != Market.stocks.value:
         raise ValueError("Autonomous intraday execution currently supports mapped NSE/BSE cash equities only.")
     tick = dhan_feed_service.latest_tick(symbol, market)
@@ -50,7 +49,12 @@ def analyze_for_autonomous_intraday(symbol: str, market: str, equity: float):
     age_seconds = (datetime.now(timezone.utc) - received_at).total_seconds()
     if age_seconds < 0 or age_seconds > 10:
         raise ValueError("Dhan live quote is stale; autonomous entries are blocked until a fresh tick arrives.")
+    return tick, age_seconds
 
+
+def analyze_for_autonomous_intraday(symbol: str, market: str, equity: float):
+    """Train/evaluate on history, but require a fresh Dhan quote for execution price."""
+    tick, age_seconds = require_fresh_dhan_tick(symbol, market)
     report = analyze_with_preserved_ml(symbol, market, equity)
     fx_rate = float(report["fx_to_inr"])
     if fx_rate <= 0:
@@ -67,7 +71,6 @@ def analyze_for_autonomous_intraday(symbol: str, market: str, equity: float):
         "age_seconds": round(age_seconds, 3),
     }
     return report
-
 
 automation_service = PaperAutomation(paper_broker, analyze_for_autonomous_intraday)
 
@@ -312,6 +315,8 @@ async def automation_start(request: AutomationStartRequest):
     try:
         watchlist = [{"symbol": item.symbol.upper(), "market": item.market.value}
                      for item in request.watchlist]
+        for item in watchlist:
+            require_fresh_dhan_tick(item["symbol"], item["market"])
         return await automation_service.start(watchlist, request.interval_seconds)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
