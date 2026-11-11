@@ -12,6 +12,7 @@ from trading_agent.providers import fetch_market_candles, quote_to_inr_rate
 from trading_agent.backtest import BacktestConfig, run_ema_backtest, evaluate_ml_walk_forward
 from trading_agent.market import features
 from .execution import build_paper_buy_plan
+from .exit_manager import risk_policy_summary
 from .gemini import (GeminiNotConfiguredError, GeminiProviderError,
                      generate_market_brief, get_gemini_status)
 
@@ -69,6 +70,12 @@ def health():
     return {"status": "ok", "environment": "paper-first",
             "market_data_mode": settings.market_data_mode,
             "live_trading_enabled": False, "database": "sqlite-paper-ledger"}
+
+
+@app.get("/api/risk/policy")
+def risk_policy():
+    """Expose deterministic paper risk/exit settings; never enables live trading."""
+    return risk_policy_summary()
 
 
 @app.get("/api/markets")
