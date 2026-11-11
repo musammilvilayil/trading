@@ -229,7 +229,7 @@ function App() {
         <p className="muted">Optional DhanHQ v2 WebSocket quotes. Incoming INR prices update mapped paper positions and evaluate protective exits. This connection cannot place real broker orders.</p>
         <div className="controls dhan-controls">
           <select value={dhanSegment} onChange={e=>setDhanSegment(e.target.value)} aria-label="Dhan exchange segment">
-            <option value="NSE_EQ">NSE Equity</option><option value="BSE_EQ">BSE Equity</option><option value="NSE_FNO">NSE F&amp;O</option><option value="MCX_COMM">MCX Commodity</option>
+            <option value="NSE_EQ">NSE Equity</option><option value="BSE_EQ">BSE Equity</option>
           </select>
           <input value={dhanSecurityId} onChange={e=>setDhanSecurityId(e.target.value.replace(/[^0-9]/g,''))} placeholder="Dhan Security ID" aria-label="Dhan Security ID"/>
           <button onClick={dhanStatus?.running ? stopDhanFeed : startDhanFeed} disabled={dhanBusy || (!dhanStatus?.running && (!dhanStatus?.configured || !dhanSecurityId.trim()))}>
