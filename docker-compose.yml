@@ -1,0 +1,25 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      STARTING_CAPITAL_INR: "25000"
+      LIVE_TRADING_ENABLED: "false"
+      MARKET_DATA_MODE: "provider"
+      ATLAS_DB_PATH: /app/data/atlas.sqlite3
+    volumes:
+      - atlas_data:/app/data
+  web:
+    build: ./frontend
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_URL: http://localhost:8000
+    depends_on:
+      - api
+
+volumes:
+  atlas_data:

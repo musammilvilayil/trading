@@ -29,7 +29,8 @@ def features(df: pd.DataFrame) -> pd.DataFrame:
     typical = (x['High'] + x['Low'] + close) / 3
     x['vwap'] = (typical * x['Volume']).cumsum() / x['Volume'].cumsum().replace(0, np.nan)
     x['volume_z'] = (x['Volume'] - x['Volume'].rolling(20).mean()) / x['Volume'].rolling(20).std()
-    x['target'] = (close.shift(-1) > close).astype(int)
+    next_close = close.shift(-1)
+    x['target'] = ((next_close > close).where(next_close.notna())).astype('float')
     return x.replace([np.inf, -np.inf], np.nan).dropna()
 
 

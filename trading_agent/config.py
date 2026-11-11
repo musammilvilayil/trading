@@ -3,7 +3,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     starting_capital: float = 25_000
-    max_position_inr: float = 3_000
+    max_position_inr: float = 2_500
     risk_per_trade_pct: float = 0.005
     max_daily_loss_pct: float = 0.02
     min_confidence: float = 0.62
