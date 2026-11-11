@@ -24,6 +24,8 @@ Personal AI research and **autonomous paper-trading** workspace, built on top of
 - Autonomous scans can analyse all supported quote currencies; execution sizing converts quote prices and ATR into INR. If provider FX conversion is unavailable, that instrument's scan fails closed.
 - The autonomous worker runs inside the API process and stops when that process restarts. It is opt-in and paper-only. The ML confidence gate is configurable and must not be interpreted as a calibrated probability of profit.
 - Yahoo Finance is a historical/research data source, not a guaranteed real-time feed or broker execution feed. Symbol coverage, intervals, delays and availability vary.
+- Optional DhanHQ v2 WebSocket adapter receives live ticker/quote/full packets. It can mark mapped INR stock paper positions and evaluate protective exits, but it never submits broker orders. The Dhan instrument security ID must be mapped explicitly by the user.
+- Dhan feed credentials are read only from backend environment variables `DHAN_CLIENT_ID` and `DHAN_ACCESS_TOKEN`; never commit them. Dhan Data API access/subscription and current broker terms may apply.
 - Backtests are simulations, not proof of profitability. The included EMA backtest is a baseline, not the ML agent's walk-forward performance report.
 - Gemini is an advisory-only layer. Its output is never passed to the autonomous paper worker, risk engine or order executor; the quantitative ML engine remains independent.
 - Gemini does not fetch live market news in this integration. Sentiment is marked `not_assessed` unless the caller explicitly supplies headlines; supplied headlines are treated as untrusted text.
@@ -40,6 +42,16 @@ pip install -r backend/requirements.txt
 uvicorn app.main:app --app-dir backend --reload --port 8000 --env-file .env
 ```
 API docs: http://localhost:8000/docs
+
+### Optional DhanHQ live market-data setup
+
+1. Use a Dhan account and create/enable DhanHQ Trading & Data API access in the Dhan web platform.
+2. Add `DHAN_CLIENT_ID` and `DHAN_ACCESS_TOKEN` to the backend's local `.env` file. Never expose the token in frontend code or commit it.
+3. Obtain the exact Dhan exchange segment and security ID from Dhan's instrument master. Do not guess IDs.
+4. Start the feed through `POST /api/market/dhan/start` with an instrument mapping and `mode` of `ticker`, `quote` or `full`. The feed supports reconnects and reports status through `GET /api/market/dhan/status`.
+5. For mapped NSE/BSE cash positions, incoming INR prices update paper marks and run the protective exit manager. No real broker order is sent.
+
+Dhan's API documentation specifies WebSocket live market data and separate trading order APIs. The live order API is deliberately not implemented in this release. Confirm broker requirements, static-IP whitelisting, exchange algo registration and applicable SEBI/NSE requirements before any real-money automation.
 
 ### Optional Gemini setup
 1. Create an API key in [Google AI Studio](https://aistudio.google.com/apikey).
@@ -72,6 +84,9 @@ The SQLite ledger persists in the named `atlas_data` volume.
 | GET | `/api/market/{symbol}/candles` | Clearly labelled mock candles |
 | GET | `/api/market/provider-candles` | Provider historical candles |
 | GET | `/api/market/fx-to-inr` | Provider FX conversion rate |
+| GET | `/api/market/dhan/status` | DhanHQ live market-feed status |
+| POST | `/api/market/dhan/start` | Start DhanHQ v2 live quote feed for mapped instruments |
+| POST | `/api/market/dhan/stop` | Stop DhanHQ live quote feed |
 | POST | `/api/analyze` | Mock-data technical signal |
 | POST | `/api/analyze/ml` | Historical-data V1 ML research analysis |
 | POST | `/api/backtest` | Historical EMA baseline backtest |
