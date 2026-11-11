@@ -5,7 +5,9 @@ from trading_agent.market import features
 
 
 def test_vwap_resets_for_each_utc_session():
-    index = pd.date_range("2026-11-10T09:15:00Z", periods=50, freq="5min")
+    index = pd.date_range("2026-11-10T09:15:00Z", periods=25, freq="5min").append(
+        pd.date_range("2026-11-11T09:15:00Z", periods=25, freq="5min")
+    )
     close = np.linspace(100, 110, 50)
     frame = pd.DataFrame({
         "Open": close - 0.2,
@@ -17,7 +19,7 @@ def test_vwap_resets_for_each_utc_session():
 
     result = features(frame)
 
-    first_bar_second_day = index[0].normalize() + pd.Timedelta(days=1)
+    first_bar_second_day = index[25]
     expected = (frame.loc[first_bar_second_day, "High"]
                 + frame.loc[first_bar_second_day, "Low"]
                 + frame.loc[first_bar_second_day, "Close"]) / 3
