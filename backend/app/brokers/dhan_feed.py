@@ -9,6 +9,9 @@ from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable
 from urllib.parse import urlencode
 
+import httpx
+import pandas as pd
+
 
 SEGMENT_NAMES = {
     0: "IDX_I", 1: "NSE_EQ", 2: "NSE_FNO", 3: "NSE_CURRENCY",
@@ -284,3 +287,92 @@ class DhanFeedService:
         finally:
             self._state["running"] = False
             self._state["connected"] = False
+
+
+
+def parse_dhan_intraday_history(payload: dict[str, Any]) -> pd.DataFrame:
+    """Convert Dhan /charts/intraday parallel arrays into validated OHLCV candles."""
+    required = ("open", "high", "low", "close", "volume", "timestamp")
+    if not isinstance(payload, dict) or any(key not in payload for key in required):
+        raise DhanFeedError("Dhan historical response is missing required OHLCV arrays.")
+    lengths = {len(payload[key]) for key in required}
+    if len(lengths) != 1:
+        raise DhanFeedError("Dhan historical response arrays have inconsistent lengths.")
+    if not lengths or next(iter(lengths)) < 100:
+        raise DhanFeedError("Dhan historical response contains fewer than 100 candles.")
+    frame = pd.DataFrame({
+        "Open": payload["open"],
+        "High": payload["high"],
+        "Low": payload["low"],
+        "Close": payload["close"],
+        "Volume": payload["volume"],
+    })
+    frame.index = pd.to_datetime(payload["timestamp"], unit="s", utc=True)
+    frame = frame.apply(pd.to_numeric, errors="coerce").dropna()
+    frame = frame[~frame.index.duplicated(keep="last")].sort_index()
+    frame = frame[
+        (frame["Open"] > 0) & (frame["High"] > 0) & (frame["Low"] > 0)
+        & (frame["Close"] > 0) & (frame["High"] >= frame["Low"])
+        & (frame["Volume"] >= 0)
+    ]
+    if len(frame) < 100:
+        raise DhanFeedError("Fewer than 100 valid Dhan historical candles remain after validation.")
+    return frame
+
+
+class DhanHistoricalDataProvider:
+    """DhanHQ v2 intraday history for active cash-equity instruments."""
+
+    endpoint = "https://api.dhan.co/v2/charts/intraday"
+
+    def __init__(self):
+        self.client_id = os.getenv("DHAN_CLIENT_ID", "").strip()
+        self.access_token = os.getenv("DHAN_ACCESS_TOKEN", "").strip()
+
+    def fetch_intraday(self, security_id: str, exchange_segment: str,
+                       interval: str = "5", lookback_days: int = 60) -> pd.DataFrame:
+        if not self.access_token or not self.client_id:
+            raise DhanFeedError("Configure DHAN_CLIENT_ID and DHAN_ACCESS_TOKEN for Dhan historical data.")
+        if exchange_segment not in {"NSE_EQ", "BSE_EQ"}:
+            raise DhanFeedError("Dhan ML history currently supports NSE_EQ and BSE_EQ cash equities.")
+        if not str(security_id).isdigit():
+            raise DhanFeedError("Dhan security ID must be numeric.")
+        if interval not in {"1", "5", "15", "25", "60"}:
+            raise DhanFeedError("Dhan historical interval must be 1, 5, 15, 25 or 60 minutes.")
+        if not 1 <= lookback_days <= 90:
+            raise DhanFeedError("Dhan intraday history requests are limited to 90 days.")
+        from datetime import datetime, timedelta
+        from zoneinfo import ZoneInfo
+        now = datetime.now(ZoneInfo("Asia/Kolkata"))
+        payload = {
+            "securityId": str(security_id),
+            "exchangeSegment": exchange_segment,
+            "instrument": "EQUITY",
+            "interval": interval,
+            "oi": False,
+            "fromDate": (now - timedelta(days=lookback_days)).strftime("%Y-%m-%d %H:%M:%S"),
+            "toDate": now.strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        try:
+            response = httpx.post(
+                self.endpoint,
+                headers={
+                    "access-token": self.access_token,
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                },
+                json=payload,
+                timeout=25.0,
+            )
+            if response.status_code != 200:
+                raise DhanFeedError(
+                    f"Dhan historical API returned HTTP {response.status_code}; check data API access and instrument mapping."
+                )
+            body = response.json()
+            if not isinstance(body, dict):
+                raise DhanFeedError("Dhan historical API returned an unexpected response.")
+            return parse_dhan_intraday_history(body)
+        except DhanFeedError:
+            raise
+        except (httpx.HTTPError, ValueError, TypeError) as exc:
+            raise DhanFeedError("Dhan historical candles could not be retrieved or parsed.") from exc
