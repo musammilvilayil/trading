@@ -42,7 +42,7 @@ def _analyze_frame(symbol: str, market: str, raw: pd.DataFrame,
     else:
         agent = TradingAgent()
         agent.train(featured)
-    proposal = agent.propose(provider_symbol, featured)
+    proposal = agent.propose(symbol.upper(), featured)
     return {
         "proposal": asdict(proposal),
         "training_rows": len(featured),
