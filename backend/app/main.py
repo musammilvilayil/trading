@@ -18,6 +18,10 @@ from .exit_manager import risk_policy_summary
 from .gemini import (GeminiNotConfiguredError, GeminiProviderError,
                      generate_market_brief, get_gemini_status)
 from .brokers.dhan_feed import DhanFeedError, DhanFeedService
+from .notifications.telegram import (
+    TelegramNotConfiguredError, TelegramDeliveryError,
+    telegram_status, send_telegram_message,
+)
 
 paper_broker = PaperBroker(initial_capital=settings.starting_capital)
 
@@ -411,3 +415,35 @@ async def dhan_feed_start(request: DhanFeedStartRequest):
 @app.post("/api/market/dhan/stop")
 async def dhan_feed_stop():
     return await dhan_feed_service.stop()
+
+
+
+@app.get("/api/notifications/telegram/status")
+def telegram_notification_status():
+    return telegram_status()
+
+
+@app.post("/api/reports/daily/telegram")
+async def send_daily_telegram_report():
+    report = paper_broker.daily_report()
+    if not telegram_status()["configured"]:
+        raise HTTPException(
+            status_code=503,
+            detail="Configure TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in the backend environment.",
+        )
+    message = (
+        f"ATLAS PAPER TRADING — {report['date_ist']} IST\\n"
+        f"Daily P&L: ₹{report['daily_pnl']:.2f} ({report['daily_pnl_pct']:.2f}%)\\n"
+        f"Realized: ₹{report['realized_pnl']:.2f} | Unrealized: ₹{report['unrealized_pnl']:.2f}\\n"
+        f"Entries: {report['entries']}/5 | Closed exits: {report['closed_trades']}\\n"
+        f"Win rate: {report['win_rate_pct'] if report['win_rate_pct'] is not None else 'N/A'}%\\n"
+        f"Profit factor: {report['profit_factor'] if report['profit_factor'] is not None else 'N/A'}\\n"
+        f"Wins: {report['wins']} | Losses: {report['losses']} | Open positions: {report['open_positions']}\\n"
+        "Paper simulation only — not live broker P&L or financial advice."
+    )
+    try:
+        return await send_telegram_message(message)
+    except TelegramNotConfiguredError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except TelegramDeliveryError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
