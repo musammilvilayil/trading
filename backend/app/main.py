@@ -191,6 +191,11 @@ def paper_portfolio():
     return dashboard()
 
 
+@app.get("/api/reports/daily")
+def daily_report():
+    return paper_broker.daily_report()
+
+
 @app.post("/api/paper/orders")
 def paper_order(request: PaperOrderRequest):
     try:
