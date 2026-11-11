@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from threading import Lock
 from typing import Any
 
 import pandas as pd
@@ -12,14 +13,35 @@ from trading_agent.config import settings
 from .brokers.dhan_feed import DhanHistoricalDataProvider, DhanFeedError
 
 
+_DHAN_MODEL_CACHE: dict[str, tuple[str, TradingAgent]] = {}
+_DHAN_MODEL_CACHE_LOCK = Lock()
+
+
 def _analyze_frame(symbol: str, market: str, raw: pd.DataFrame,
                    provider: str, provider_symbol: str,
-                   equity: float, fx_rate: float) -> dict[str, Any]:
+                   equity: float, fx_rate: float,
+                   cache_key: str | None = None) -> dict[str, Any]:
     featured = features(raw)
     if len(featured) < 100:
         raise ValueError("Not enough valid feature rows to train the V1 model.")
-    agent = TradingAgent()
-    agent.train(featured)
+    cache_hit = False
+    if cache_key:
+        latest_bar = featured.index[-1].isoformat()
+        with _DHAN_MODEL_CACHE_LOCK:
+            cached = _DHAN_MODEL_CACHE.get(cache_key)
+            if cached and cached[0] == latest_bar:
+                agent, cache_hit = cached[1], True
+            else:
+                agent = TradingAgent()
+                agent.train(featured)
+                _DHAN_MODEL_CACHE[cache_key] = (latest_bar, agent)
+                if len(_DHAN_MODEL_CACHE) > 30:
+                    oldest_key = next(iter(_DHAN_MODEL_CACHE))
+                    if oldest_key != cache_key:
+                        _DHAN_MODEL_CACHE.pop(oldest_key, None)
+    else:
+        agent = TradingAgent()
+        agent.train(featured)
     proposal = agent.propose(provider_symbol, featured)
     return {
         "proposal": asdict(proposal),
@@ -32,6 +54,7 @@ def _analyze_frame(symbol: str, market: str, raw: pd.DataFrame,
         "data_source": provider,
         "data_mode": "historical_research",
         "latest_signal_candle_at": featured.index[-1].isoformat(),
+        "model_cache_hit": cache_hit,
         "fx_to_inr": fx_rate,
         "entry_price_inr": round(proposal.entry * fx_rate, 6),
         "paper_trading": True,
@@ -69,4 +92,5 @@ def analyze_with_dhan_history(symbol: str, market: str, equity: float,
     return _analyze_frame(
         symbol, market, raw, "DhanHQ v2 Historical API",
         f"{exchange_segment}:{security_id}", equity, 1.0,
+        cache_key=f"{exchange_segment}:{security_id}",
     )
