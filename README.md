@@ -92,6 +92,7 @@ The SQLite ledger persists in the named `atlas_data` volume.
 | POST | `/api/backtest` | Historical EMA baseline backtest |
 | POST | `/api/backtest/ml` | Expanding-window out-of-sample ML metrics |
 | GET | `/api/paper/portfolio` | Paper account and positions |
+| GET | `/api/reports/daily` | IST daily P&L, win rate, profit factor and journal summary |
 | POST | `/api/paper/orders` | Simulated INR-denominated order |
 | GET | `/api/risk/policy` | Active deterministic risk and exit policy |
 | POST | `/api/paper/market-tick` | Mark position and run protective exit manager |
