@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import struct
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable
@@ -248,6 +249,7 @@ class DhanFeedService:
                         }
                         key = f"{instrument['market']}:{instrument['symbol']}"
                         self._latest[key] = tick
+                        delay = 1
                         self._state.update({
                             "connected": True,
                             "received_ticks": self._state["received_ticks"] + 1,
