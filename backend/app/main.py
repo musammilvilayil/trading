@@ -18,12 +18,11 @@ from .gemini import (GeminiNotConfiguredError, GeminiProviderError,
 from .brokers.dhan_feed import DhanFeedError, DhanFeedService
 
 paper_broker = PaperBroker(initial_capital=settings.starting_capital)
-automation_service = PaperAutomation(paper_broker, analyze_with_preserved_ml)
 
 
 async def _monitor_paper_positions_from_dhan(tick: dict):
-    # Dhan live quotes are used only to mark INR-denominated paper positions
-    # and evaluate their protective exits. This callback cannot place live orders.
+    # Dhan live quotes are used only to mark INR-denominated cash-equity paper
+    # positions and evaluate protective exits. No real order is sent.
     if tick.get("market") != Market.stocks.value or tick.get("exchange_segment") not in {"NSE_EQ", "BSE_EQ"}:
         return
     try:
@@ -37,6 +36,39 @@ async def _monitor_paper_positions_from_dhan(tick: dict):
 
 
 dhan_feed_service = DhanFeedService(on_tick=_monitor_paper_positions_from_dhan)
+
+
+def analyze_for_autonomous_intraday(symbol: str, market: str, equity: float):
+    """Train/evaluate on history, but require a fresh Dhan quote for execution price."""
+    if market != Market.stocks.value:
+        raise ValueError("Autonomous intraday execution currently supports mapped NSE/BSE cash equities only.")
+    tick = dhan_feed_service.latest_tick(symbol, market)
+    if not tick:
+        raise ValueError("Connect the Dhan live feed and receive a quote before running autonomous intraday trading.")
+    received_at = datetime.fromisoformat(tick["received_at"])
+    age_seconds = (datetime.now(timezone.utc) - received_at).total_seconds()
+    if age_seconds < 0 or age_seconds > 10:
+        raise ValueError("Dhan live quote is stale; autonomous entries are blocked until a fresh tick arrives.")
+
+    report = analyze_with_preserved_ml(symbol, market, equity)
+    fx_rate = float(report["fx_to_inr"])
+    if fx_rate <= 0:
+        raise ValueError("Invalid INR conversion rate.")
+    live_price_inr = float(tick["last_price"])
+    report["proposal"]["entry"] = live_price_inr / fx_rate
+    report["entry_price_inr"] = live_price_inr
+    report["data_mode"] = "historical_model_with_fresh_dhan_quote"
+    report["live_quote"] = {
+        "provider": "DhanHQ v2",
+        "last_price_inr": live_price_inr,
+        "exchange_time": tick.get("exchange_time"),
+        "received_at": tick["received_at"],
+        "age_seconds": round(age_seconds, 3),
+    }
+    return report
+
+
+automation_service = PaperAutomation(paper_broker, analyze_for_autonomous_intraday)
 
 app = FastAPI(title="Atlas AI Trading API", version="0.3.0",
               description="Multi-market research and paper trading. Live trading is disabled.")
@@ -291,8 +323,8 @@ async def automation_stop():
 @app.post("/api/automation/run-once")
 def autonomous_paper_run(request: AnalyzeRequest):
     try:
-        report = analyze_with_preserved_ml(request.symbol.upper(), request.market.value,
-                                            paper_broker.portfolio()["equity"])
+        report = analyze_for_autonomous_intraday(request.symbol.upper(), request.market.value,
+                                                  paper_broker.portfolio()["equity"])
         proposal = report["proposal"]
         price_inr = float(proposal["entry"]) * float(report["fx_to_inr"])
         tick = paper_broker.process_price(request.symbol.upper(), request.market.value, price_inr)
