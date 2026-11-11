@@ -100,7 +100,7 @@ class PaperBroker:
 
     def _daily_guard(self, db, equity: float):
         account = db.execute("SELECT * FROM account WHERE id=1").fetchone()
-        today = datetime.now(timezone.utc).date().isoformat()
+        today = datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
         baseline = account["day_start_equity"]
         if account["day_key"] != today:
             baseline = equity
@@ -131,8 +131,16 @@ class PaperBroker:
                 raise PaperTradeRejected("Buy order exceeds 10% of initial paper capital.")
             realized = 0.0
             if side == "buy":
-                if (reference_price - stop_loss) * quantity > equity * 0.005:
-                    raise PaperTradeRejected("Trade risk exceeds 0.5% of current equity.")
+                estimated_stop_fill = stop_loss * (1 - slip_rate)
+                estimated_round_trip_cost = (
+                    (execution_price - estimated_stop_fill) * quantity
+                    + fee
+                    + estimated_stop_fill * quantity * fee_rate
+                )
+                if estimated_round_trip_cost > equity * 0.005:
+                    raise PaperTradeRejected(
+                        "Estimated stop-loss risk including fees and slippage exceeds 0.5% of current equity."
+                    )
                 if notional + fee > account["cash"]:
                     raise PaperTradeRejected("Insufficient paper cash.")
                 exposure = db.execute("SELECT COALESCE(SUM(quantity*last_price),0) AS value FROM positions").fetchone()["value"]
@@ -178,9 +186,13 @@ class PaperBroker:
                     "status": "filled_simulated", "created_at": now}
 
     def process_price(self, symbol: str, market: str, price: float):
+        """Update a mark and execute a triggered protective exit atomically."""
         if price <= 0:
             raise PaperTradeRejected("Price must be positive.")
-        symbol = symbol.upper()
+        symbol = symbol.strip().upper()
+        fee_rate, slip_rate = 0.001, 0.0005
+        now = datetime.now(timezone.utc).isoformat()
+
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
             position = db.execute(
@@ -188,6 +200,11 @@ class PaperBroker:
             ).fetchone()
             if not position:
                 return {"symbol": symbol, "updated": False, "reason": "no_open_position"}
+            if position["stop_loss"] is None:
+                raise PaperTradeRejected(
+                    "This legacy position has no stop-loss. Review and close it manually."
+                )
+
             decision = evaluate_long_exit(
                 entry_price=float(position["average_price"]),
                 current_price=float(price),
@@ -195,7 +212,6 @@ class PaperBroker:
                 current_stop=float(position["stop_loss"]),
                 policy=LongExitPolicy(),
             )
-            now = datetime.now(timezone.utc).isoformat()
             db.execute(
                 """UPDATE positions SET last_price=?,stop_loss=?,high_watermark=?,updated_at=?
                    WHERE market=? AND symbol=?""",
@@ -203,6 +219,7 @@ class PaperBroker:
                  now, market, symbol),
             )
             quantity = float(position["quantity"])
+
             if not decision["exit_triggered"]:
                 return {
                     "symbol": symbol, "updated": True, "stop_triggered": False,
@@ -211,12 +228,35 @@ class PaperBroker:
                     "break_even_active": decision["break_even_active"],
                     "trailing_active": decision["trailing_active"],
                 }
-        order = self.place_order(
-            symbol, market, "sell", quantity, price,
-            reason=f"protective_exit:{decision['exit_reason']}",
-        )
-        return {
-            "symbol": symbol, "updated": True, "stop_triggered": True,
-            "exit_reason": decision["exit_reason"],
-            "effective_stop": decision["effective_stop"], "order": order,
-        }
+
+            # Keep the position mark, cash update, order journal and deletion in
+            # one SQLite transaction so concurrent price ticks cannot double-sell.
+            execution_price = price * (1 - slip_rate)
+            notional = quantity * execution_price
+            fee = notional * fee_rate
+            realized = (execution_price - float(position["average_price"])) * quantity - fee
+            db.execute(
+                "UPDATE account SET cash=cash+?,realized_pnl=realized_pnl+? WHERE id=1",
+                (notional - fee, realized),
+            )
+            db.execute(
+                "DELETE FROM positions WHERE market=? AND symbol=?", (market, symbol)
+            )
+            order_id = f"PAPER-{uuid4().hex[:12].upper()}"
+            db.execute(
+                "INSERT INTO orders VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                (order_id, symbol, market, "sell", quantity, execution_price, fee,
+                 abs(execution_price - price) * quantity, realized,
+                 "filled_simulated", f"protective_exit:{decision['exit_reason']}", now),
+            )
+            order = {
+                "id": order_id, "symbol": symbol, "market": market, "side": "sell",
+                "quantity": quantity, "price": round(execution_price, 6),
+                "fee": round(fee, 4), "realized_pnl": round(realized, 4),
+                "status": "filled_simulated", "created_at": now,
+            }
+            return {
+                "symbol": symbol, "updated": True, "stop_triggered": True,
+                "exit_reason": decision["exit_reason"],
+                "effective_stop": decision["effective_stop"], "order": order,
+            }
