@@ -98,6 +98,66 @@ class PaperBroker:
                 "mode": "paper", "live_trading_enabled": False
             }
 
+    def daily_report(self):
+        """Return a deterministic IST trading-day summary from the paper order journal."""
+        now_ist = datetime.now(ZoneInfo("Asia/Kolkata"))
+        today = now_ist.date().isoformat()
+        day_start_utc = now_ist.replace(
+            hour=0, minute=0, second=0, microsecond=0
+        ).astimezone(timezone.utc).isoformat()
+        with self._connect() as db:
+            account = db.execute("SELECT * FROM account WHERE id=1").fetchone()
+            equity = self._equity(db)
+            baseline = float(account["day_start_equity"])
+            if account["day_key"] != today:
+                baseline = equity
+                db.execute(
+                    "UPDATE account SET day_key=?,day_start_equity=? WHERE id=1",
+                    (today, baseline),
+                )
+            orders = [
+                dict(row) for row in db.execute(
+                    "SELECT * FROM orders WHERE created_at>=? ORDER BY created_at DESC",
+                    (day_start_utc,),
+                ).fetchall()
+            ]
+            exits = [row for row in orders if row["side"] == "sell"]
+            wins = [row for row in exits if row["realized_pnl"] > 0]
+            losses = [row for row in exits if row["realized_pnl"] < 0]
+            gross_profit = sum(float(row["realized_pnl"]) for row in wins)
+            gross_loss = abs(sum(float(row["realized_pnl"]) for row in losses))
+            realized_today = sum(float(row["realized_pnl"]) for row in exits)
+            unrealized = sum(
+                (float(row["last_price"]) - float(row["average_price"])) * float(row["quantity"])
+                for row in db.execute("SELECT * FROM positions").fetchall()
+            )
+            entries = sum(1 for row in orders if row["side"] == "buy")
+            closed = len(exits)
+            return {
+                "date_ist": today,
+                "currency": "INR",
+                "mode": "paper",
+                "live_trading_enabled": False,
+                "starting_equity": round(baseline, 2),
+                "current_equity": round(equity, 2),
+                "daily_pnl": round(equity - baseline, 2),
+                "daily_pnl_pct": round((equity / baseline - 1) * 100, 3) if baseline else 0.0,
+                "realized_pnl": round(realized_today, 2),
+                "unrealized_pnl": round(unrealized, 2),
+                "entries": entries,
+                "closed_trades": closed,
+                "wins": len(wins),
+                "losses": len(losses),
+                "win_rate_pct": round(len(wins) / closed * 100, 2) if closed else None,
+                "gross_profit": round(gross_profit, 2),
+                "gross_loss": round(gross_loss, 2),
+                "profit_factor": round(gross_profit / gross_loss, 3) if gross_loss else None,
+                "daily_loss_limit_hit": equity <= baseline * 0.98,
+                "entry_limit_hit": entries >= 5,
+                "open_positions": db.execute("SELECT COUNT(*) AS count FROM positions").fetchone()["count"],
+                "orders": orders[:20],
+            }
+
     def _daily_guard(self, db, equity: float):
         account = db.execute("SELECT * FROM account WHERE id=1").fetchone()
         now_ist = datetime.now(ZoneInfo("Asia/Kolkata"))
