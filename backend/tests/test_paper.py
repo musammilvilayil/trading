@@ -56,3 +56,21 @@ def test_paper_broker_enforces_five_entry_daily_limit(tmp_path):
         broker.place_order(f"STOCK{index}", "stocks", "buy", 1, 1000, 990)
     with pytest.raises(PaperTradeRejected, match="entry limit"):
         broker.place_order("STOCK5", "stocks", "buy", 1, 1000, 990)
+
+
+def test_daily_report_calculates_realized_results_and_win_rate(tmp_path):
+    broker = PaperBroker(str(tmp_path / "daily-report.db"))
+    broker.place_order("WINNER", "stocks", "buy", 1, 100, 90)
+    broker.place_order("WINNER", "stocks", "sell", 1, 110, reason="test_exit")
+    broker.place_order("LOSER", "stocks", "buy", 1, 100, 90)
+    broker.place_order("LOSER", "stocks", "sell", 1, 90, reason="test_exit")
+
+    report = broker.daily_report()
+
+    assert report["entries"] == 2
+    assert report["closed_trades"] == 2
+    assert report["wins"] == 1
+    assert report["losses"] == 1
+    assert report["win_rate_pct"] == 50.0
+    assert report["realized_pnl"] < 0
+    assert report["live_trading_enabled"] is False
