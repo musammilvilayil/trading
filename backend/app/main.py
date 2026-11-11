@@ -24,7 +24,7 @@ automation_service = PaperAutomation(paper_broker, analyze_with_preserved_ml)
 async def _monitor_paper_positions_from_dhan(tick: dict):
     # Dhan live quotes are used only to mark INR-denominated paper positions
     # and evaluate their protective exits. This callback cannot place live orders.
-    if tick.get("market") != Market.stocks.value:
+    if tick.get("market") != Market.stocks.value or tick.get("exchange_segment") not in {"NSE_EQ", "BSE_EQ"}:
         return
     try:
         result = await asyncio.to_thread(
