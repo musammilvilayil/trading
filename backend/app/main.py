@@ -15,9 +15,28 @@ from .execution import build_paper_buy_plan
 from .exit_manager import risk_policy_summary
 from .gemini import (GeminiNotConfiguredError, GeminiProviderError,
                      generate_market_brief, get_gemini_status)
+from .brokers.dhan_feed import DhanFeedError, DhanFeedService
 
 paper_broker = PaperBroker(initial_capital=settings.starting_capital)
 automation_service = PaperAutomation(paper_broker, analyze_with_preserved_ml)
+
+
+async def _monitor_paper_positions_from_dhan(tick: dict):
+    # Dhan live quotes are used only to mark INR-denominated paper positions
+    # and evaluate their protective exits. This callback cannot place live orders.
+    if tick.get("market") != Market.stocks.value:
+        return
+    try:
+        result = await asyncio.to_thread(
+            paper_broker.process_price, tick["symbol"], tick["market"], float(tick["last_price"])
+        )
+        if result.get("stop_triggered"):
+            tick["paper_exit"] = result
+    except PaperTradeRejected as exc:
+        tick["paper_monitor_error"] = str(exc)
+
+
+dhan_feed_service = DhanFeedService(on_tick=_monitor_paper_positions_from_dhan)
 
 app = FastAPI(title="Atlas AI Trading API", version="0.3.0",
               description="Multi-market research and paper trading. Live trading is disabled.")
@@ -192,6 +211,18 @@ class AutomationStartRequest(BaseModel):
     interval_seconds: int = Field(default=300, ge=60, le=3600)
 
 
+class DhanInstrumentRequest(BaseModel):
+    symbol: str = Field(min_length=2, max_length=24)
+    market: Market = Market.stocks
+    exchange_segment: str = Field(default="NSE_EQ", min_length=3, max_length=24)
+    security_id: str = Field(min_length=1, max_length=24)
+
+
+class DhanFeedStartRequest(BaseModel):
+    instruments: list[DhanInstrumentRequest] = Field(min_length=1, max_length=5000)
+    mode: str = Field(default="quote")
+
+
 
 @app.post("/api/backtest/ml")
 def ml_walk_forward_backtest(request: AnalyzeRequest):
@@ -293,3 +324,30 @@ def autonomous_paper_run(request: AnalyzeRequest):
                 "risk_plan": plan, "live_trading_enabled": False}
     except (PaperTradeRejected, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/api/market/dhan/status")
+def dhan_feed_status():
+    return dhan_feed_service.status()
+
+
+@app.post("/api/market/dhan/start")
+async def dhan_feed_start(request: DhanFeedStartRequest):
+    try:
+        instruments = [
+            {
+                "symbol": item.symbol.upper(),
+                "market": item.market.value,
+                "exchange_segment": item.exchange_segment.upper(),
+                "security_id": item.security_id,
+            }
+            for item in request.instruments
+        ]
+        return await dhan_feed_service.start(instruments, request.mode.lower())
+    except DhanFeedError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/market/dhan/stop")
+async def dhan_feed_stop():
+    return await dhan_feed_service.stop()
