@@ -29,14 +29,19 @@ function App() {
   const [geminiStatus, setGeminiStatus] = useState(null);
   const [geminiBrief, setGeminiBrief] = useState(null);
   const [geminiBusy, setGeminiBusy] = useState(false);
+  const [dhanStatus, setDhanStatus] = useState(null);
+  const [dhanSecurityId, setDhanSecurityId] = useState('');
+  const [dhanSegment, setDhanSegment] = useState('NSE_EQ');
+  const [dhanBusy, setDhanBusy] = useState(false);
 
   async function refresh() {
     try {
-      const [d, h, a, g] = await Promise.all([fetch(API + '/api/dashboard'), fetch(API + '/api/health'), fetch(API + '/api/automation/status'), fetch(API + '/api/ai/status')]);
+      const [d, h, a, g, df] = await Promise.all([fetch(API + '/api/dashboard'), fetch(API + '/api/health'), fetch(API + '/api/automation/status'), fetch(API + '/api/ai/status'), fetch(API + '/api/market/dhan/status')]);
       if (!d.ok || !h.ok) throw new Error('API unavailable');
       setDashboard(await d.json()); setHealth(await h.json());
       if (a.ok) setAutoStatus(await a.json());
       if (g.ok) setGeminiStatus(await g.json());
+      if (df.ok) setDhanStatus(await df.json());
       setError('');
     } catch { setError('Backend unavailable. Start the FastAPI server on port 8000.'); }
   }
@@ -61,6 +66,36 @@ function App() {
         setPriceInr(String(nativePrice));
       }
     } catch (e) { setError(e.message); } finally { setLoading(false); }
+  }
+
+  async function startDhanFeed() {
+    setDhanBusy(true); setError(''); setNotice('');
+    try {
+      const res = await fetch(API + '/api/market/dhan/start', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+          mode:'quote',
+          instruments:[{symbol, market:'stocks', exchange_segment:dhanSegment, security_id:dhanSecurityId.trim()}]
+        })
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.detail || 'Could not start Dhan market feed');
+      setDhanStatus(body);
+      setNotice('Dhan live quote feed requested. Paper positions mapped to this symbol will be marked from incoming INR quotes.');
+    } catch(e) { setError(e.message); }
+    finally { setDhanBusy(false); await refresh(); }
+  }
+
+  async function stopDhanFeed() {
+    setDhanBusy(true); setError('');
+    try {
+      const res = await fetch(API + '/api/market/dhan/stop', {method:'POST'});
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.detail || 'Could not stop Dhan market feed');
+      setDhanStatus(body);
+      setNotice('Dhan live market feed stopped.');
+    } catch(e) { setError(e.message); }
+    finally { setDhanBusy(false); await refresh(); }
   }
 
   async function runGeminiBrief() {
@@ -189,6 +224,27 @@ function App() {
           {[['Market research','Yahoo Finance historical adapter','active'],['ML strategy','HistGradientBoosting + EMA/VWAP','active'],['Risk manager','0.5% trade risk / 2% daily guard','active'],['Paper broker','SQLite ledger + simulated fills','active'],['Live execution','Not implemented / disabled','locked']].map(([a,b,c])=><div className="agent-row" key={a}><span className="agent-dot"/><div><b>{a}</b><small>{b}</small></div><span className={'agent-state '+c}>{c}</span></div>)}
         </article>
       </div>
+      <article className="panel dhan-panel">
+        <div className="panel-title"><div><span className="eyebrow">REAL-TIME MARKET DATA</span><h2>DhanHQ live feed</h2></div><Activity size={19}/></div>
+        <p className="muted">Optional DhanHQ v2 WebSocket quotes. Incoming INR prices update mapped paper positions and evaluate protective exits. This connection cannot place real broker orders.</p>
+        <div className="controls dhan-controls">
+          <select value={dhanSegment} onChange={e=>setDhanSegment(e.target.value)} aria-label="Dhan exchange segment">
+            <option value="NSE_EQ">NSE Equity</option><option value="BSE_EQ">BSE Equity</option><option value="NSE_FNO">NSE F&amp;O</option><option value="MCX_COMM">MCX Commodity</option>
+          </select>
+          <input value={dhanSecurityId} onChange={e=>setDhanSecurityId(e.target.value.replace(/[^0-9]/g,''))} placeholder="Dhan Security ID" aria-label="Dhan Security ID"/>
+          <button onClick={dhanStatus?.running ? stopDhanFeed : startDhanFeed} disabled={dhanBusy || (!dhanStatus?.running && (!dhanStatus?.configured || !dhanSecurityId.trim()))}>
+            {dhanBusy ? 'Connecting…' : dhanStatus?.running ? 'Stop feed' : 'Connect live feed'}
+          </button>
+        </div>
+        <div className="dhan-feed-state">
+          <span className={'agent-dot '+(dhanStatus?.connected?'':'offline')}></span>
+          <b>{dhanStatus?.connected ? 'Connected' : dhanStatus?.running ? 'Connecting / reconnecting' : 'Disconnected'}</b>
+          <small>{dhanStatus?.configured ? 'Credentials configured on backend' : 'Add DHAN_CLIENT_ID and DHAN_ACCESS_TOKEN to backend .env'}</small>
+          <span className="tag">{dhanStatus?.received_ticks || 0} TICKS</span>
+        </div>
+        {dhanStatus?.latest_ticks?.length ? <div className="dhan-ticks">{dhanStatus.latest_ticks.slice(-5).reverse().map((tick,i)=><div className="dhan-tick" key={tick.symbol+tick.received_at+i}><b>{tick.symbol}</b><strong>{fmt(tick.last_price)}</strong><small>{tick.exchange_time ? new Date(tick.exchange_time).toLocaleTimeString() : 'Exchange time unavailable'}</small>{tick.paper_exit && <span className="agent-state">PAPER EXIT</span>}</div>)}</div> : <div className="empty"><Activity size={20}/><b>No live ticks received</b><span>Enter the exact Dhan security ID to subscribe to a symbol.</span></div>}
+        {dhanStatus?.last_error && <p className="feed-error">{dhanStatus.last_error}</p>}
+      </article>
       <article className="panel gemini-panel">
         <div className="panel-title"><div><span className="eyebrow">GENERATIVE AI INTELLIGENCE</span><h2>Gemini market brief</h2></div><BrainCircuit size={19}/></div>
         <div className="gemini-toolbar"><p className="muted">{geminiStatus?.configured ? 'Gemini is connected. Generate an advisory explanation of the selected instrument and quantitative ML output.' : 'Gemini API key is not configured. Add GEMINI_API_KEY to the backend environment to enable this panel.'}</p><button onClick={runGeminiBrief} disabled={geminiBusy || !geminiStatus?.configured}><Sparkles size={14}/>{geminiBusy ? 'Thinking…' : 'Generate brief'}</button></div>
