@@ -20,3 +20,23 @@
 .position small{display:block;color:#71839b;font-size:10px;margin-top:4px}
 .position button{font-size:10px;padding:7px 11px}
 @media(max-width:650px){.position{grid-template-columns:1fr 1fr auto;gap:7px}.position button{padding:7px;font-size:9px}}
+
+.gemini-panel{margin:0 0 14px}
+.gemini-toolbar{display:flex;align-items:center;justify-content:space-between;gap:14px}
+.gemini-toolbar .muted{max-width:760px;line-height:1.6}
+.gemini-toolbar button{white-space:nowrap;font-size:11px}
+.gemini-toolbar button:disabled{opacity:.45;cursor:not-allowed}
+.gemini-content{border-top:1px solid #26364b;margin-top:16px;padding-top:15px;color:#b7c6d9;font-size:12px;line-height:1.65}
+.gemini-content h3{font-size:11px;color:#8fcaff;letter-spacing:.5px;margin:15px 0 6px}
+.gemini-content p{margin:7px 0;color:#a6b6ca}
+.gemini-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:14px}
+.gemini-summary>div{background:#0a1422;border:1px solid #26364b;border-radius:8px;padding:10px}
+.gemini-summary small{display:block;font-size:8px;letter-spacing:1px;color:#778aa4;margin-bottom:5px}
+.gemini-summary b{font-size:11px;color:#dbe8f8}
+.gemini-summary .bias.bullish{color:#65d8a8}.gemini-summary .bias.bearish{color:#ff8793}.gemini-summary .bias.mixed{color:#e8c77b}
+.gemini-columns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.gemini-columns>div{background:#0a1422;border:1px solid #26364b;border-radius:8px;padding:11px}
+.gemini-columns ul{padding-left:17px;margin:5px 0;color:#9eafc5}
+.gemini-columns li{margin:4px 0}
+.gemini-disclaimer{display:block;color:#71839b;font-size:9px;margin-top:13px;line-height:1.5}
+@media(max-width:650px){.gemini-toolbar{align-items:stretch;flex-direction:column}.gemini-toolbar button{justify-content:center}.gemini-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.gemini-columns{grid-template-columns:1fr}}
