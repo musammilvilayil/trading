@@ -13,11 +13,21 @@ def build_paper_buy_plan(proposal: dict, equity_inr: float, cash_inr: float,
         return None
     entry_inr = entry * fx_to_inr
     stop_distance_inr = max(atr * fx_to_inr, entry_inr * 0.002)
+    stop_price_inr = entry_inr - stop_distance_inr
     risk_budget = equity_inr * 0.005
     max_order = initial_capital_inr * 0.10
     max_exposure = initial_capital_inr * 0.50
-    qty = min(risk_budget / stop_distance_inr, max_order / (entry_inr * 1.0005),
-              cash_inr / (entry_inr * 1.001501))
+    # Match PaperBroker's estimated round-trip risk: adverse entry/exit slippage
+    # and fees on both sides, not just the raw entry-to-stop distance.
+    entry_fill = entry_inr * 1.0005
+    stop_fill = stop_price_inr * 0.9995
+    risk_per_share = (
+        entry_fill - stop_fill
+        + entry_fill * 0.001
+        + stop_fill * 0.001
+    )
+    qty = min(risk_budget / risk_per_share, max_order / (entry_inr * 1.0015005),
+              cash_inr / (entry_inr * 1.0015005))
     if market == "stocks":
         qty = math.floor(qty)
     else:
@@ -27,8 +37,8 @@ def build_paper_buy_plan(proposal: dict, equity_inr: float, cash_inr: float,
     return {
         "quantity": qty,
         "entry_inr": round(entry_inr, 6),
-        "stop_loss_inr": round(entry_inr - stop_distance_inr, 6),
-        "max_loss_inr": round(qty * stop_distance_inr, 4),
+        "stop_loss_inr": round(stop_price_inr, 6),
+        "max_loss_inr": round(qty * risk_per_share, 4),
         "fx_to_inr": round(fx_to_inr, 8),
         "quote_entry": entry,
         "max_order_inr": max_order,
