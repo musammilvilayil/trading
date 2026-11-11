@@ -14,14 +14,14 @@ Personal AI research and **autonomous paper-trading** workspace, built on top of
 - Deterministic risk limits: estimated 0.5% equity risk per trade including simulated round-trip costs, 2% daily drawdown guard, maximum 5 new entries per IST trading day, 10% initial-capital buy-order cap and 50% gross exposure cap.
 - EMA crossover historical backtest with next-candle-open execution, fees, slippage, drawdown, Sharpe and win-rate reporting.
 - Expanding-window, out-of-sample ML walk-forward evaluation with accuracy, precision, recall, F1, ROC-AUC and Brier score. Backtest capital is converted from INR into the instrument quote currency and results are reported in that currency.
-- Opt-in autonomous paper worker with watchlist, 1–60 minute scan interval, start/stop controls, ML-based entry/exit proposals, FX-aware sizing and stop-loss checks.
+- Opt-in autonomous paper worker for mapped NSE/BSE cash equities, with watchlist, 1–60 minute scan interval, start/stop controls, Dhan-native ML history, fresh live quote validation, INR sizing and protective exits.
 - Open-position monitor and manual close controls in the dashboard.
 - GitHub Actions tests/build and Docker Compose with persistent SQLite volume.
 
 ## Safety and limitations
 
 - The account and all paper ledger values are INR-denominated. Manual paper orders and mark-price requests must use INR-converted prices. Estimated stop risk includes entry/exit fees and slippage assumptions.
-- Autonomous scans can analyse all supported quote currencies; execution sizing converts quote prices and ATR into INR. If provider FX conversion is unavailable, that instrument's scan fails closed.
+- Manual research/backtests support multiple quote currencies with INR conversion. Autonomous trading is currently limited to NSE/BSE cash equities in INR; crypto, forex, commodities and derivatives are not enabled for autonomous execution.
 - The autonomous worker runs inside the API process and stops when that process restarts. It is opt-in and paper-only. Autonomous NSE/BSE cash-equity entries are limited to weekdays during 09:15–15:30 IST, require a fresh Dhan quote (maximum age 10 seconds), and use Dhan's 5-minute historical candles for model features/training; Yahoo historical candles remain a separate manual research path. The session check does not include an exchange holiday/special-session calendar. The ML confidence gate is configurable and must not be interpreted as a calibrated probability of profit.
 - Yahoo Finance is a historical/research data source, not a guaranteed real-time feed or broker execution feed. Symbol coverage, intervals, delays and availability vary.
 - Optional DhanHQ v2 WebSocket adapter receives live ticker/quote/full packets. It can mark mapped INR stock paper positions and evaluate protective exits, but it never submits broker orders. The Dhan instrument security ID must be mapped explicitly by the user. Autonomous model history is fetched from Dhan's intraday historical endpoint (60-day window per request), while live quote ticks provide the execution mark.
