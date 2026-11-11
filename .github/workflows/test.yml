@@ -2,7 +2,7 @@ name: Tests
 
 on:
   push:
-    branches: [main, ai-agent-v1]
+    branches: [main, ai-agent-v1, "feat/**"]
   pull_request:
     branches: [main]
 
