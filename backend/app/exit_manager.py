@@ -52,7 +52,7 @@ def evaluate_long_exit(
         )
 
     exit_triggered = current_price <= effective_stop
-    if exit_triggered and trailing_active and effective_stop > max(current_stop, entry_price):
+    if exit_triggered and trailing_active:
         exit_reason = "trailing_stop"
     elif exit_triggered and break_even_active and effective_stop >= entry_price:
         exit_reason = "break_even_stop"
