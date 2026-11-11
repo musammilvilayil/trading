@@ -169,6 +169,9 @@ class DhanFeedService:
             "last_tick_at": None, "last_error": None,
         }
 
+    def latest_tick(self, symbol: str, market: str = "stocks") -> dict[str, Any] | None:
+        return self._latest.get(f"{market}:{symbol.strip().upper()}")
+
     def status(self) -> dict[str, Any]:
         return {
             **self._state,
