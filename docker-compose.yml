@@ -14,6 +14,8 @@ services:
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.8-flash}
       DHAN_CLIENT_ID: ${DHAN_CLIENT_ID:-}
       DHAN_ACCESS_TOKEN: ${DHAN_ACCESS_TOKEN:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
     volumes:
       - atlas_data:/app/data
   web:
