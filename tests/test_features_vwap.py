@@ -8,7 +8,7 @@ def test_vwap_resets_for_each_utc_session():
     index = pd.date_range("2026-11-10T09:15:00Z", periods=25, freq="5min").append(
         pd.date_range("2026-11-11T09:15:00Z", periods=25, freq="5min")
     )
-    close = np.linspace(100, 110, 50)
+    close = 100 + np.sin(np.arange(50) / 3) * 2 + np.arange(50) * 0.05
     frame = pd.DataFrame({
         "Open": close - 0.2,
         "High": close + 0.5,
