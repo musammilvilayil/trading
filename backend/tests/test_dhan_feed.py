@@ -74,3 +74,40 @@ def test_dhan_feed_status_never_exposes_access_token(monkeypatch):
     assert status["configured"] is True
     assert status["live_order_execution_enabled"] is False
     assert "super-secret-token" not in str(status)
+
+
+
+def test_parse_dhan_intraday_history_payload():
+    import pandas as pd
+    from app.brokers.dhan_feed import parse_dhan_intraday_history
+
+    timestamps = list(range(1_700_000_000, 1_700_000_000 + 120 * 300, 300))
+    payload = {
+        "open": [100.0] * 120,
+        "high": [101.0] * 120,
+        "low": [99.0] * 120,
+        "close": [100.5] * 120,
+        "volume": [1000] * 120,
+        "timestamp": timestamps,
+    }
+    frame = parse_dhan_intraday_history(payload)
+
+    assert len(frame) == 120
+    assert list(frame.columns) == ["Open", "High", "Low", "Close", "Volume"]
+    assert isinstance(frame.index, pd.DatetimeIndex)
+    assert frame.index.is_monotonic_increasing
+
+
+def test_parse_dhan_history_rejects_mismatched_arrays():
+    from app.brokers.dhan_feed import parse_dhan_intraday_history
+
+    payload = {
+        "open": [100.0] * 120,
+        "high": [101.0] * 120,
+        "low": [99.0] * 120,
+        "close": [100.5] * 119,
+        "volume": [1000] * 120,
+        "timestamp": list(range(120)),
+    }
+    with pytest.raises(DhanFeedError):
+        parse_dhan_intraday_history(payload)
