@@ -5,6 +5,9 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
+from zoneinfo import ZoneInfo
+
+from .exit_manager import LongExitPolicy, evaluate_long_exit
 
 
 class PaperTradeRejected(ValueError):
@@ -40,6 +43,7 @@ class PaperBroker:
             CREATE TABLE IF NOT EXISTS positions (
               symbol TEXT NOT NULL, market TEXT NOT NULL, quantity REAL NOT NULL,
               average_price REAL NOT NULL, last_price REAL NOT NULL, stop_loss REAL,
+              high_watermark REAL NOT NULL DEFAULT 0,
               updated_at TEXT NOT NULL,
               PRIMARY KEY(market, symbol)
             );
@@ -58,13 +62,20 @@ class PaperBroker:
                 db.execute("""CREATE TABLE positions (
                     symbol TEXT NOT NULL, market TEXT NOT NULL, quantity REAL NOT NULL,
                     average_price REAL NOT NULL, last_price REAL NOT NULL, stop_loss REAL,
+                    high_watermark REAL NOT NULL DEFAULT 0,
                     updated_at TEXT NOT NULL, PRIMARY KEY(market, symbol)
                 )""")
-                db.execute("INSERT OR IGNORE INTO positions SELECT * FROM positions_legacy")
+                db.execute("""INSERT OR IGNORE INTO positions
+                    (symbol, market, quantity, average_price, last_price, stop_loss, high_watermark, updated_at)
+                    SELECT symbol, market, quantity, average_price, last_price, stop_loss, last_price, updated_at
+                    FROM positions_legacy""")
                 db.execute("DROP TABLE positions_legacy")
+            elif "high_watermark" not in {row["name"] for row in position_info}:
+                db.execute("ALTER TABLE positions ADD COLUMN high_watermark REAL NOT NULL DEFAULT 0")
+                db.execute("UPDATE positions SET high_watermark=last_price WHERE high_watermark=0")
             db.execute("INSERT OR IGNORE INTO account(id,initial_capital,cash,day_start_equity,day_key) VALUES(1,?,?,?,?)",
                        (self.initial_capital, self.initial_capital, self.initial_capital,
-                        datetime.now(timezone.utc).date().isoformat()))
+                        datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()))
 
     def _equity(self, db):
         row = db.execute("SELECT cash FROM account WHERE id=1").fetchone()
@@ -132,11 +143,16 @@ class PaperBroker:
                     total = old["quantity"] + quantity
                     avg = (old["quantity"] * old["average_price"] + quantity * execution_price + fee) / total
                     effective_stop = max(old["stop_loss"] or 0, stop_loss)
-                    db.execute("UPDATE positions SET quantity=?,average_price=?,last_price=?,stop_loss=?,updated_at=? WHERE market=? AND symbol=?",
-                               (total, avg, reference_price, effective_stop, now, market, symbol))
+                    high_watermark = max(old["high_watermark"], reference_price)
+                    db.execute("""UPDATE positions SET quantity=?,average_price=?,last_price=?,stop_loss=?,
+                               high_watermark=?,updated_at=? WHERE market=? AND symbol=?""",
+                               (total, avg, reference_price, effective_stop, high_watermark, now, market, symbol))
                 else:
-                    db.execute("INSERT INTO positions VALUES(?,?,?,?,?,?,?)",
-                               (symbol, market, quantity, execution_price + fee / quantity, reference_price, stop_loss, now))
+                    db.execute("""INSERT INTO positions
+                               (symbol,market,quantity,average_price,last_price,stop_loss,high_watermark,updated_at)
+                               VALUES(?,?,?,?,?,?,?,?)""",
+                               (symbol, market, quantity, execution_price + fee / quantity,
+                                reference_price, stop_loss, reference_price, now))
                 db.execute("UPDATE account SET cash=cash-? WHERE id=1", (notional + fee,))
             else:
                 old = db.execute("SELECT * FROM positions WHERE market=? AND symbol=?", (market, symbol)).fetchone()
@@ -164,17 +180,43 @@ class PaperBroker:
     def process_price(self, symbol: str, market: str, price: float):
         if price <= 0:
             raise PaperTradeRejected("Price must be positive.")
+        symbol = symbol.upper()
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            position = db.execute("SELECT * FROM positions WHERE market=? AND symbol=?", (market, symbol.upper())).fetchone()
+            position = db.execute(
+                "SELECT * FROM positions WHERE market=? AND symbol=?", (market, symbol)
+            ).fetchone()
             if not position:
-                return {"symbol": symbol.upper(), "updated": False, "reason": "no_open_position"}
-            db.execute("UPDATE positions SET last_price=?,updated_at=? WHERE market=? AND symbol=?",
-                       (price, datetime.now(timezone.utc).isoformat(), market, symbol.upper()))
-            stop = position["stop_loss"]
-            should_exit = stop is not None and price <= stop
-            if not should_exit:
-                return {"symbol": symbol.upper(), "updated": True, "stop_triggered": False}
-        order = self.place_order(symbol, market, "sell", position["quantity"], price,
-                                 reason="stop_loss_trigger")
-        return {"symbol": symbol.upper(), "updated": True, "stop_triggered": True, "order": order}
+                return {"symbol": symbol, "updated": False, "reason": "no_open_position"}
+            decision = evaluate_long_exit(
+                entry_price=float(position["average_price"]),
+                current_price=float(price),
+                highest_price=float(position["high_watermark"] or position["last_price"]),
+                current_stop=float(position["stop_loss"]),
+                policy=LongExitPolicy(),
+            )
+            now = datetime.now(timezone.utc).isoformat()
+            db.execute(
+                """UPDATE positions SET last_price=?,stop_loss=?,high_watermark=?,updated_at=?
+                   WHERE market=? AND symbol=?""",
+                (price, decision["effective_stop"], decision["high_watermark"],
+                 now, market, symbol),
+            )
+            quantity = float(position["quantity"])
+            if not decision["exit_triggered"]:
+                return {
+                    "symbol": symbol, "updated": True, "stop_triggered": False,
+                    "effective_stop": decision["effective_stop"],
+                    "high_watermark": decision["high_watermark"],
+                    "break_even_active": decision["break_even_active"],
+                    "trailing_active": decision["trailing_active"],
+                }
+        order = self.place_order(
+            symbol, market, "sell", quantity, price,
+            reason=f"protective_exit:{decision['exit_reason']}",
+        )
+        return {
+            "symbol": symbol, "updated": True, "stop_triggered": True,
+            "exit_reason": decision["exit_reason"],
+            "effective_stop": decision["effective_stop"], "order": order,
+        }
