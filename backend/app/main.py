@@ -60,6 +60,11 @@ def analyze_for_autonomous_intraday(symbol: str, market: str, equity: float):
         security_id=tick["security_id"],
         exchange_segment=tick["exchange_segment"],
     )
+    signal_candle_at = datetime.fromisoformat(report["latest_signal_candle_at"])
+    signal_age_seconds = (datetime.now(timezone.utc) - signal_candle_at).total_seconds()
+    if signal_age_seconds < 0 or signal_age_seconds > 600:
+        raise ValueError("Dhan historical signal candle is older than 10 minutes; autonomous trading is blocked.")
+    report["signal_candle_age_seconds"] = round(signal_age_seconds, 3)
     fx_rate = float(report["fx_to_inr"])
     if fx_rate <= 0:
         raise ValueError("Invalid INR conversion rate.")
