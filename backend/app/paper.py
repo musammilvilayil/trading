@@ -100,13 +100,21 @@ class PaperBroker:
 
     def _daily_guard(self, db, equity: float):
         account = db.execute("SELECT * FROM account WHERE id=1").fetchone()
-        today = datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
+        now_ist = datetime.now(ZoneInfo("Asia/Kolkata"))
+        today = now_ist.date().isoformat()
         baseline = account["day_start_equity"]
         if account["day_key"] != today:
             baseline = equity
             db.execute("UPDATE account SET day_key=?, day_start_equity=? WHERE id=1", (today, baseline))
         if equity <= baseline * 0.98:
             raise PaperTradeRejected("Daily 2% drawdown guard is active; new buys are blocked.")
+        day_start_utc = now_ist.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc).isoformat()
+        entries_today = db.execute(
+            "SELECT COUNT(*) AS count FROM orders WHERE side='buy' AND created_at>=?",
+            (day_start_utc,),
+        ).fetchone()["count"]
+        if entries_today >= 5:
+            raise PaperTradeRejected("Daily entry limit of 5 trades has been reached.")
 
     def place_order(self, symbol: str, market: str, side: str, quantity: float,
                     reference_price: float, stop_loss: float | None = None,
