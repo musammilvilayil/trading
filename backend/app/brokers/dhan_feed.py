@@ -265,7 +265,17 @@ class DhanFeedService:
                     raise
                 except Exception as exc:
                     self._state["connected"] = False
-                    self._state["last_error"] = str(exc)[:300]
+                    safe_error = str(exc)
+                    for secret in (self.client.access_token, self.client.client_id):
+                        if secret:
+                            safe_error = safe_error.replace(secret, "[redacted]")
+                    safe_error = re.sub(r"(?i)(token=)[^&\\s]+", r"\\1[redacted]", safe_error)
+                    if not isinstance(exc, DhanFeedError):
+                        safe_error = (
+                            f"{type(exc).__name__}: Dhan feed connection failed; "
+                            "check credentials, data subscription, instrument IDs and network."
+                        )
+                    self._state["last_error"] = safe_error[:300]
                     await asyncio.sleep(delay)
                     delay = min(delay * 2, 30)
         finally:
