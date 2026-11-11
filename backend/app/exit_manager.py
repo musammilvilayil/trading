@@ -80,6 +80,7 @@ def risk_policy_summary() -> dict:
         "daily_drawdown_fraction": 0.02,
         "max_buy_order_fraction_of_initial_capital": 0.10,
         "max_gross_exposure_fraction_of_initial_capital": 0.50,
+        "max_entries_per_day": 5,
         "long_exit_policy": exits.as_dict(),
         "notes": [
             "Stops are simulated against incoming price marks; they are not guaranteed fill prices.",
