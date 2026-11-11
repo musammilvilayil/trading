@@ -46,3 +46,13 @@ def test_same_symbol_can_exist_in_multiple_markets(tmp_path):
     positions = broker.portfolio()["positions"]
     assert len(positions) == 2
     assert {p["market"] for p in positions} == {"stocks", "crypto"}
+
+
+def test_paper_broker_enforces_five_entry_daily_limit(tmp_path):
+    from app.paper import PaperBroker, PaperTradeRejected
+
+    broker = PaperBroker(str(tmp_path / "daily-limit.db"))
+    for index in range(5):
+        broker.place_order(f"STOCK{index}", "stocks", "buy", 1, 1000, 990)
+    with pytest.raises(PaperTradeRejected, match="entry limit"):
+        broker.place_order("STOCK5", "stocks", "buy", 1, 1000, 990)
