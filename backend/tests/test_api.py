@@ -78,3 +78,13 @@ def test_nse_regular_session_window_uses_ist_and_weekdays():
     assert not is_nse_regular_session(datetime(2026, 11, 11, 9, 14, tzinfo=ist))
     assert not is_nse_regular_session(datetime(2026, 11, 11, 15, 31, tzinfo=ist))
     assert not is_nse_regular_session(datetime(2026, 11, 14, 12, 0, tzinfo=ist))
+
+
+def test_telegram_status_never_exposes_bot_token(monkeypatch):
+    from app.main import telegram_notification_status
+
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "private-test-token")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "123456")
+    status = telegram_notification_status()
+    assert status["configured"] is True
+    assert "private-test-token" not in str(status)
