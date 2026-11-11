@@ -9,7 +9,6 @@ from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable
 from urllib.parse import urlencode
 
-import httpx
 import pandas as pd
 
 
@@ -331,6 +330,8 @@ class DhanHistoricalDataProvider:
 
     def fetch_intraday(self, security_id: str, exchange_segment: str,
                        interval: str = "5", lookback_days: int = 60) -> pd.DataFrame:
+        import httpx
+
         if not self.access_token or not self.client_id:
             raise DhanFeedError("Configure DHAN_CLIENT_ID and DHAN_ACCESS_TOKEN for Dhan historical data.")
         if exchange_segment not in {"NSE_EQ", "BSE_EQ"}:
