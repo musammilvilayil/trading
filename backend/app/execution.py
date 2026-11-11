@@ -14,6 +14,8 @@ def build_paper_buy_plan(proposal: dict, equity_inr: float, cash_inr: float,
     entry_inr = entry * fx_to_inr
     stop_distance_inr = max(atr * fx_to_inr, entry_inr * 0.002)
     stop_price_inr = entry_inr - stop_distance_inr
+    if stop_price_inr <= 0:
+        return None
     risk_budget = equity_inr * 0.005
     max_order = initial_capital_inr * 0.10
     max_exposure = initial_capital_inr * 0.50
