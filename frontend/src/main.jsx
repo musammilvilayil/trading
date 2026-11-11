@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Activity, ArrowDownRight, ArrowUpRight, Bot, CandlestickChart, CircleDollarSign, Cpu, Gauge, Layers3, Play, RefreshCw, ShieldCheck, Wallet, FlaskConical } from 'lucide-react';
+import { Activity, ArrowDownRight, ArrowUpRight, Bot, CandlestickChart, CircleDollarSign, Cpu, Gauge, Layers3, Play, RefreshCw, ShieldCheck, Wallet, FlaskConical, BrainCircuit, Sparkles } from 'lucide-react';
 import './styles.css';
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:8000';
@@ -26,13 +26,27 @@ function App() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [health, setHealth] = useState(null);
+  const [geminiStatus, setGeminiStatus] = useState(null);
+  const [geminiBrief, setGeminiBrief] = useState(null);
+  const [geminiBusy, setGeminiBusy] = useState(false);
+  const [dhanStatus, setDhanStatus] = useState(null);
+  const [dhanSecurityId, setDhanSecurityId] = useState('');
+  const [dhanSegment, setDhanSegment] = useState('NSE_EQ');
+  const [dhanBusy, setDhanBusy] = useState(false);
+  const [dailyReport, setDailyReport] = useState(null);
+  const [telegramStatus, setTelegramStatus] = useState(null);
+  const [telegramBusy, setTelegramBusy] = useState(false);
 
   async function refresh() {
     try {
-      const [d, h, a] = await Promise.all([fetch(API + '/api/dashboard'), fetch(API + '/api/health'), fetch(API + '/api/automation/status')]);
+      const [d, h, a, g, df, dr, ts] = await Promise.all([fetch(API + '/api/dashboard'), fetch(API + '/api/health'), fetch(API + '/api/automation/status'), fetch(API + '/api/ai/status'), fetch(API + '/api/market/dhan/status'), fetch(API + '/api/reports/daily'), fetch(API + '/api/notifications/telegram/status')]);
       if (!d.ok || !h.ok) throw new Error('API unavailable');
       setDashboard(await d.json()); setHealth(await h.json());
       if (a.ok) setAutoStatus(await a.json());
+      if (g.ok) setGeminiStatus(await g.json());
+      if (df.ok) setDhanStatus(await df.json());
+      if (dr.ok) setDailyReport(await dr.json());
+      if (ts.ok) setTelegramStatus(await ts.json());
       setError('');
     } catch { setError('Backend unavailable. Start the FastAPI server on port 8000.'); }
   }
@@ -57,6 +71,61 @@ function App() {
         setPriceInr(String(nativePrice));
       }
     } catch (e) { setError(e.message); } finally { setLoading(false); }
+  }
+
+  async function startDhanFeed() {
+    setDhanBusy(true); setError(''); setNotice('');
+    try {
+      const res = await fetch(API + '/api/market/dhan/start', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+          mode:'quote',
+          instruments:[{symbol, market:'stocks', exchange_segment:dhanSegment, security_id:dhanSecurityId.trim()}]
+        })
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.detail || 'Could not start Dhan market feed');
+      setDhanStatus(body);
+      setNotice('Dhan live quote feed requested. Paper positions mapped to this symbol will be marked from incoming INR quotes.');
+    } catch(e) { setError(e.message); }
+    finally { setDhanBusy(false); await refresh(); }
+  }
+
+  async function stopDhanFeed() {
+    setDhanBusy(true); setError('');
+    try {
+      const res = await fetch(API + '/api/market/dhan/stop', {method:'POST'});
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.detail || 'Could not stop Dhan market feed');
+      setDhanStatus(body);
+      setNotice('Dhan live market feed stopped.');
+    } catch(e) { setError(e.message); }
+    finally { setDhanBusy(false); await refresh(); }
+  }
+
+  async function sendDailyTelegram() {
+    setTelegramBusy(true); setError(''); setNotice('');
+    try {
+      const res = await fetch(API + '/api/reports/daily/telegram', {method:'POST'});
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.detail || 'Telegram report delivery failed');
+      setNotice('Daily paper report sent to Telegram.');
+    } catch(e) { setError(e.message); }
+    finally { setTelegramBusy(false); }
+  }
+
+  async function runGeminiBrief() {
+    setGeminiBusy(true); setError(''); setNotice('');
+    try {
+      const res = await fetch(API + '/api/ai/market-brief', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({symbol, market, analysis, news_context:[]})
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.detail || 'Gemini market brief failed');
+      setGeminiBrief(body);
+    } catch(e) { setError(e.message); }
+    finally { setGeminiBusy(false); }
   }
 
   async function runAutonomous() {
@@ -160,17 +229,61 @@ function App() {
       {notice && <div className="notice">{notice}</div>}
       <div className="section-head"><div><h2>Portfolio snapshot</h2><p>Starting virtual capital · {fmt(dashboard?.capital ?? 25000)}</p></div><span className="tag"><span className="pulse"/> {health?.status === 'ok' ? 'API connected' : 'Connecting'}</span></div>
       <div className="metrics">{metrics.map(({label,value,icon:Icon,detail})=><article className="metric" key={label}><div className="metric-top"><span>{label}</span><Icon size={17}/></div><strong>{value}</strong><small>{detail}</small></article>)}</div>
+      <article className="panel daily-report">
+        <div className="panel-title"><div><span className="eyebrow">TRADING JOURNAL</span><h2>Today's performance</h2></div><button className="secondary report-send" onClick={sendDailyTelegram} disabled={telegramBusy || !telegramStatus?.configured}>{telegramBusy ? 'Sending…' : 'Send daily report'}</button></div>
+        {dailyReport ? <div className="daily-stats">
+          <div><small>DAILY P&amp;L</small><b className={dailyReport.daily_pnl >= 0 ? 'positive' : 'negative'}>{fmt(dailyReport.daily_pnl)}</b></div>
+          <div><small>REALIZED P&amp;L</small><b>{fmt(dailyReport.realized_pnl)}</b></div>
+          <div><small>WIN RATE</small><b>{dailyReport.win_rate_pct == null ? '—' : dailyReport.win_rate_pct+'%'}</b></div>
+          <div><small>ENTRIES</small><b>{dailyReport.entries} / 5</b></div>
+          <div><small>CLOSED TRADES</small><b>{dailyReport.closed_trades}</b></div>
+          <div><small>PROFIT FACTOR</small><b>{dailyReport.profit_factor == null ? '—' : dailyReport.profit_factor}</b></div>
+          <p>IST trading day · {dailyReport.wins} wins / {dailyReport.losses} losses · Paper account only · {telegramStatus?.configured ? 'Telegram ready' : 'Telegram not configured'}</p>
+        </div> : <div className="empty"><Activity size={20}/><b>No daily report</b></div>}
+      </article>
       <div className="grid">
         <article className="panel analysis"><div className="panel-title"><div><span className="eyebrow">STRATEGY WORKBENCH</span><h2>AI market analysis</h2></div><span className="tag">{autoStatus?.running ? 'AUTO SCANNING' : 'HISTORICAL FEED'}</span></div>
-          <p className="muted">Choose a market and provider symbol. ML analysis uses historical Yahoo Finance candles. Autonomous mode is paper-only and scans every 5 minutes.</p>
+          <p className="muted">Choose a market and symbol. Manual research uses Yahoo Finance history; autonomous mode is currently limited to NSE/BSE cash equities and uses Dhan 5-minute history plus a fresh Dhan live quote. Execution remains paper-only.</p>
           <div className="controls"><select value={market} onChange={e=>setMarket(e.target.value)}><option value="stocks">Stocks</option><option value="crypto">Crypto</option><option value="forex">Forex</option><option value="commodities">Commodities</option></select><input value={symbol} onChange={e=>setSymbol(e.target.value.toUpperCase())} aria-label="Symbol"/><label className="ml-toggle"><input type="checkbox" checked={useMl} onChange={e=>setUseMl(e.target.checked)}/> V1 ML</label><button onClick={analyze} disabled={loading}>{loading?'Analysing…':'Analyse'}</button></div>
           {analysis && <div className="result"><div><small>MODEL SIGNAL</small><strong className={'signal '+signal}>{(signal || 'wait').toUpperCase()}</strong></div><div><small>CONFIDENCE</small><b>{confidence == null ? '—' : (confidence*100).toFixed(1)+'%'}</b></div><div><small>LAST / ENTRY</small><b>{lastPrice == null ? '—' : Number(lastPrice).toFixed(2)}</b></div><p>{analysis.disclaimer || analysis.data_source + ' · ' + analysis.data_mode}</p></div>}
-          <div className="action-row"><button onClick={runAutonomous} disabled={autoBusy}><Play size={14}/>{autoBusy?'Running agent…':'Run one AI cycle'}</button><button className="secondary" onClick={autoStatus?.running ? stopAutomation : startAutomation} disabled={autoBusy}>{autoStatus?.running ? 'Stop autonomous' : 'Start autonomous'}</button><button className="secondary" onClick={runBacktest} disabled={backtestBusy}><FlaskConical size={14}/>{backtestBusy?'Testing…':'EMA backtest 2 years'}</button><button className="secondary" onClick={runMlBacktest} disabled={mlBacktestBusy}><FlaskConical size={14}/>{mlBacktestBusy?'Evaluating…':'ML walk-forward'}</button></div>
+          <div className="action-row"><button onClick={runAutonomous} disabled={autoBusy || market !== 'stocks'}><Play size={14}/>{autoBusy?'Running agent…':'Run one AI cycle'}</button><button className="secondary" onClick={autoStatus?.running ? stopAutomation : startAutomation} disabled={autoBusy || (!autoStatus?.running && market !== 'stocks')}>{autoStatus?.running ? 'Stop autonomous' : 'Start autonomous'}</button><button className="secondary" onClick={runBacktest} disabled={backtestBusy}><FlaskConical size={14}/>{backtestBusy?'Testing…':'EMA backtest 2 years'}</button><button className="secondary" onClick={runMlBacktest} disabled={mlBacktestBusy}><FlaskConical size={14}/>{mlBacktestBusy?'Evaluating…':'ML walk-forward'}</button></div>
         </article>
         <article className="panel agents"><div className="panel-title"><div><span className="eyebrow">AUTOMATION LAYER</span><h2>Agent status</h2></div><Cpu size={19}/></div>
-          {[['Market research','Yahoo Finance historical adapter','active'],['ML strategy','HistGradientBoosting + EMA/VWAP','active'],['Risk manager','0.5% trade risk / 2% daily guard','active'],['Paper broker','SQLite ledger + simulated fills','active'],['Live execution','Not implemented / disabled','locked']].map(([a,b,c])=><div className="agent-row" key={a}><span className="agent-dot"/><div><b>{a}</b><small>{b}</small></div><span className={'agent-state '+c}>{c}</span></div>)}
+          {[['Market research','Yahoo Finance historical adapter','active'],['ML strategy','HistGradientBoosting + EMA/VWAP','active'],['Risk manager','0.5% trade risk / 2% daily loss / 5 entries','active'],['Paper broker','SQLite ledger + simulated fills','active'],['Live execution','Not implemented / disabled','locked']].map(([a,b,c])=><div className="agent-row" key={a}><span className="agent-dot"/><div><b>{a}</b><small>{b}</small></div><span className={'agent-state '+c}>{c}</span></div>)}
         </article>
       </div>
+      <article className="panel dhan-panel">
+        <div className="panel-title"><div><span className="eyebrow">REAL-TIME MARKET DATA</span><h2>DhanHQ live feed</h2></div><Activity size={19}/></div>
+        <p className="muted">Optional DhanHQ v2 WebSocket quotes. Incoming NSE/BSE cash-equity INR prices update mapped paper positions and evaluate protective exits. This connection cannot place real broker orders. Autonomous entries require a quote received within the last 10 seconds.</p>
+        <div className="controls dhan-controls">
+          <select value={dhanSegment} onChange={e=>setDhanSegment(e.target.value)} aria-label="Dhan exchange segment">
+            <option value="NSE_EQ">NSE Equity</option><option value="BSE_EQ">BSE Equity</option>
+          </select>
+          <input value={dhanSecurityId} onChange={e=>setDhanSecurityId(e.target.value.replace(/[^0-9]/g,''))} placeholder="Dhan Security ID" aria-label="Dhan Security ID" disabled={market !== 'stocks'}/>
+          <button onClick={dhanStatus?.running ? stopDhanFeed : startDhanFeed} disabled={dhanBusy || market !== 'stocks' || (!dhanStatus?.running && (!dhanStatus?.configured || !dhanSecurityId.trim()))}>
+            {dhanBusy ? 'Connecting…' : dhanStatus?.running ? 'Stop feed' : 'Connect live feed'}
+          </button>
+        </div>
+        <div className="dhan-feed-state">
+          <span className={'agent-dot '+(dhanStatus?.connected?'':'offline')}></span>
+          <b>{dhanStatus?.connected ? 'Connected' : dhanStatus?.running ? 'Connecting / reconnecting' : 'Disconnected'}</b>
+          <small>{dhanStatus?.configured ? 'Credentials configured on backend' : 'Add DHAN_CLIENT_ID and DHAN_ACCESS_TOKEN to backend .env'}</small>
+          <span className="tag">{dhanStatus?.received_ticks || 0} TICKS</span>
+        </div>
+        {dhanStatus?.latest_ticks?.length ? <div className="dhan-ticks">{dhanStatus.latest_ticks.slice(-5).reverse().map((tick,i)=><div className="dhan-tick" key={tick.symbol+tick.received_at+i}><b>{tick.symbol}</b><strong>{fmt(tick.last_price)}</strong><small>{tick.exchange_time ? new Date(tick.exchange_time).toLocaleTimeString() : 'Exchange time unavailable'}</small>{tick.paper_exit && <span className="agent-state">PAPER EXIT</span>}</div>)}</div> : <div className="empty"><Activity size={20}/><b>No live ticks received</b><span>Enter the exact Dhan security ID to subscribe to a symbol.</span></div>}
+        {dhanStatus?.last_error && <p className="feed-error">{dhanStatus.last_error}</p>}
+      </article>
+      <article className="panel gemini-panel">
+        <div className="panel-title"><div><span className="eyebrow">GENERATIVE AI INTELLIGENCE</span><h2>Gemini market brief</h2></div><BrainCircuit size={19}/></div>
+        <div className="gemini-toolbar"><p className="muted">{geminiStatus?.configured ? 'Gemini is connected. Generate an advisory explanation of the selected instrument and quantitative ML output.' : 'Gemini API key is not configured. Add GEMINI_API_KEY to the backend environment to enable this panel.'}</p><button onClick={runGeminiBrief} disabled={geminiBusy || !geminiStatus?.configured}><Sparkles size={14}/>{geminiBusy ? 'Thinking…' : 'Generate brief'}</button></div>
+        {geminiBrief?.brief && <div className="gemini-content">
+          <div className="gemini-summary"><div><small>OVERALL BIAS</small><b className={'bias '+geminiBrief.brief.overall_bias}>{geminiBrief.brief.overall_bias.toUpperCase()}</b></div><div><small>CONFIDENCE</small><b>{geminiBrief.brief.confidence.toUpperCase()}</b></div><div><small>NEWS SENTIMENT</small><b>{geminiBrief.brief.news_sentiment.replaceAll('_',' ').toUpperCase()}</b></div><div><small>ML ALIGNMENT</small><b>{geminiBrief.brief.signal_alignment.replaceAll('_',' ').toUpperCase()}</b></div></div>
+          <p>{geminiBrief.brief.summary}</p><h3>Technical interpretation</h3><p>{geminiBrief.brief.technical_interpretation}</p>
+          <div className="gemini-columns"><div><h3>Key factors</h3><ul>{geminiBrief.brief.key_factors.map((x,i)=><li key={i}>{x}</li>)}</ul></div><div><h3>Risks</h3><ul>{geminiBrief.brief.risks.map((x,i)=><li key={i}>{x}</li>)}</ul></div><div><h3>Bull case</h3><p>{geminiBrief.brief.bull_case}</p></div><div><h3>Bear case</h3><p>{geminiBrief.brief.bear_case}</p></div></div>
+          <small className="gemini-disclaimer">{geminiBrief.disclaimer} · {geminiBrief.model}</small>
+        </div>}
+        {!geminiBrief && <div className="empty"><BrainCircuit size={22}/><b>No Gemini brief generated</b><span>Gemini explains supplied analysis; it does not place or approve trades.</span></div>}
+      </article>
       <div className="grid">
         <article className="panel"><div className="panel-title"><div><span className="eyebrow">PAPER EXECUTION</span><h2>Place simulated buy</h2></div><Wallet size={18}/></div>
           <p className="muted">Price and stop must be entered in INR. For non-INR instruments, convert the quote price before placing a paper order.</p>

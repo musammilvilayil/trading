@@ -5,6 +5,9 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
+from zoneinfo import ZoneInfo
+
+from .exit_manager import LongExitPolicy, evaluate_long_exit
 
 
 class PaperTradeRejected(ValueError):
@@ -40,6 +43,7 @@ class PaperBroker:
             CREATE TABLE IF NOT EXISTS positions (
               symbol TEXT NOT NULL, market TEXT NOT NULL, quantity REAL NOT NULL,
               average_price REAL NOT NULL, last_price REAL NOT NULL, stop_loss REAL,
+              high_watermark REAL NOT NULL DEFAULT 0,
               updated_at TEXT NOT NULL,
               PRIMARY KEY(market, symbol)
             );
@@ -58,13 +62,20 @@ class PaperBroker:
                 db.execute("""CREATE TABLE positions (
                     symbol TEXT NOT NULL, market TEXT NOT NULL, quantity REAL NOT NULL,
                     average_price REAL NOT NULL, last_price REAL NOT NULL, stop_loss REAL,
+                    high_watermark REAL NOT NULL DEFAULT 0,
                     updated_at TEXT NOT NULL, PRIMARY KEY(market, symbol)
                 )""")
-                db.execute("INSERT OR IGNORE INTO positions SELECT * FROM positions_legacy")
+                db.execute("""INSERT OR IGNORE INTO positions
+                    (symbol, market, quantity, average_price, last_price, stop_loss, high_watermark, updated_at)
+                    SELECT symbol, market, quantity, average_price, last_price, stop_loss, last_price, updated_at
+                    FROM positions_legacy""")
                 db.execute("DROP TABLE positions_legacy")
+            elif "high_watermark" not in {row["name"] for row in position_info}:
+                db.execute("ALTER TABLE positions ADD COLUMN high_watermark REAL NOT NULL DEFAULT 0")
+                db.execute("UPDATE positions SET high_watermark=last_price WHERE high_watermark=0")
             db.execute("INSERT OR IGNORE INTO account(id,initial_capital,cash,day_start_equity,day_key) VALUES(1,?,?,?,?)",
                        (self.initial_capital, self.initial_capital, self.initial_capital,
-                        datetime.now(timezone.utc).date().isoformat()))
+                        datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()))
 
     def _equity(self, db):
         row = db.execute("SELECT cash FROM account WHERE id=1").fetchone()
@@ -87,15 +98,83 @@ class PaperBroker:
                 "mode": "paper", "live_trading_enabled": False
             }
 
+    def daily_report(self):
+        """Return a deterministic IST trading-day summary from the paper order journal."""
+        now_ist = datetime.now(ZoneInfo("Asia/Kolkata"))
+        today = now_ist.date().isoformat()
+        day_start_utc = now_ist.replace(
+            hour=0, minute=0, second=0, microsecond=0
+        ).astimezone(timezone.utc).isoformat()
+        with self._connect() as db:
+            account = db.execute("SELECT * FROM account WHERE id=1").fetchone()
+            equity = self._equity(db)
+            baseline = float(account["day_start_equity"])
+            if account["day_key"] != today:
+                baseline = equity
+                db.execute(
+                    "UPDATE account SET day_key=?,day_start_equity=? WHERE id=1",
+                    (today, baseline),
+                )
+            orders = [
+                dict(row) for row in db.execute(
+                    "SELECT * FROM orders WHERE created_at>=? ORDER BY created_at DESC",
+                    (day_start_utc,),
+                ).fetchall()
+            ]
+            exits = [row for row in orders if row["side"] == "sell"]
+            wins = [row for row in exits if row["realized_pnl"] > 0]
+            losses = [row for row in exits if row["realized_pnl"] < 0]
+            gross_profit = sum(float(row["realized_pnl"]) for row in wins)
+            gross_loss = abs(sum(float(row["realized_pnl"]) for row in losses))
+            realized_today = sum(float(row["realized_pnl"]) for row in exits)
+            unrealized = sum(
+                (float(row["last_price"]) - float(row["average_price"])) * float(row["quantity"])
+                for row in db.execute("SELECT * FROM positions").fetchall()
+            )
+            entries = sum(1 for row in orders if row["side"] == "buy")
+            closed = len(exits)
+            return {
+                "date_ist": today,
+                "currency": "INR",
+                "mode": "paper",
+                "live_trading_enabled": False,
+                "starting_equity": round(baseline, 2),
+                "current_equity": round(equity, 2),
+                "daily_pnl": round(equity - baseline, 2),
+                "daily_pnl_pct": round((equity / baseline - 1) * 100, 3) if baseline else 0.0,
+                "realized_pnl": round(realized_today, 2),
+                "unrealized_pnl": round(unrealized, 2),
+                "entries": entries,
+                "closed_trades": closed,
+                "wins": len(wins),
+                "losses": len(losses),
+                "win_rate_pct": round(len(wins) / closed * 100, 2) if closed else None,
+                "gross_profit": round(gross_profit, 2),
+                "gross_loss": round(gross_loss, 2),
+                "profit_factor": round(gross_profit / gross_loss, 3) if gross_loss else None,
+                "daily_loss_limit_hit": equity <= baseline * 0.98,
+                "entry_limit_hit": entries >= 5,
+                "open_positions": db.execute("SELECT COUNT(*) AS count FROM positions").fetchone()["count"],
+                "orders": orders[:20],
+            }
+
     def _daily_guard(self, db, equity: float):
         account = db.execute("SELECT * FROM account WHERE id=1").fetchone()
-        today = datetime.now(timezone.utc).date().isoformat()
+        now_ist = datetime.now(ZoneInfo("Asia/Kolkata"))
+        today = now_ist.date().isoformat()
         baseline = account["day_start_equity"]
         if account["day_key"] != today:
             baseline = equity
             db.execute("UPDATE account SET day_key=?, day_start_equity=? WHERE id=1", (today, baseline))
         if equity <= baseline * 0.98:
             raise PaperTradeRejected("Daily 2% drawdown guard is active; new buys are blocked.")
+        day_start_utc = now_ist.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc).isoformat()
+        entries_today = db.execute(
+            "SELECT COUNT(*) AS count FROM orders WHERE side='buy' AND created_at>=?",
+            (day_start_utc,),
+        ).fetchone()["count"]
+        if entries_today >= 5:
+            raise PaperTradeRejected("Daily entry limit of 5 trades has been reached.")
 
     def place_order(self, symbol: str, market: str, side: str, quantity: float,
                     reference_price: float, stop_loss: float | None = None,
@@ -120,8 +199,16 @@ class PaperBroker:
                 raise PaperTradeRejected("Buy order exceeds 10% of initial paper capital.")
             realized = 0.0
             if side == "buy":
-                if (reference_price - stop_loss) * quantity > equity * 0.005:
-                    raise PaperTradeRejected("Trade risk exceeds 0.5% of current equity.")
+                estimated_stop_fill = stop_loss * (1 - slip_rate)
+                estimated_round_trip_cost = (
+                    (execution_price - estimated_stop_fill) * quantity
+                    + fee
+                    + estimated_stop_fill * quantity * fee_rate
+                )
+                if estimated_round_trip_cost > equity * 0.005:
+                    raise PaperTradeRejected(
+                        "Estimated stop-loss risk including fees and slippage exceeds 0.5% of current equity."
+                    )
                 if notional + fee > account["cash"]:
                     raise PaperTradeRejected("Insufficient paper cash.")
                 exposure = db.execute("SELECT COALESCE(SUM(quantity*last_price),0) AS value FROM positions").fetchone()["value"]
@@ -132,11 +219,16 @@ class PaperBroker:
                     total = old["quantity"] + quantity
                     avg = (old["quantity"] * old["average_price"] + quantity * execution_price + fee) / total
                     effective_stop = max(old["stop_loss"] or 0, stop_loss)
-                    db.execute("UPDATE positions SET quantity=?,average_price=?,last_price=?,stop_loss=?,updated_at=? WHERE market=? AND symbol=?",
-                               (total, avg, reference_price, effective_stop, now, market, symbol))
+                    high_watermark = max(old["high_watermark"], reference_price)
+                    db.execute("""UPDATE positions SET quantity=?,average_price=?,last_price=?,stop_loss=?,
+                               high_watermark=?,updated_at=? WHERE market=? AND symbol=?""",
+                               (total, avg, reference_price, effective_stop, high_watermark, now, market, symbol))
                 else:
-                    db.execute("INSERT INTO positions VALUES(?,?,?,?,?,?,?)",
-                               (symbol, market, quantity, execution_price + fee / quantity, reference_price, stop_loss, now))
+                    db.execute("""INSERT INTO positions
+                               (symbol,market,quantity,average_price,last_price,stop_loss,high_watermark,updated_at)
+                               VALUES(?,?,?,?,?,?,?,?)""",
+                               (symbol, market, quantity, execution_price + fee / quantity,
+                                reference_price, stop_loss, reference_price, now))
                 db.execute("UPDATE account SET cash=cash-? WHERE id=1", (notional + fee,))
             else:
                 old = db.execute("SELECT * FROM positions WHERE market=? AND symbol=?", (market, symbol)).fetchone()
@@ -162,19 +254,77 @@ class PaperBroker:
                     "status": "filled_simulated", "created_at": now}
 
     def process_price(self, symbol: str, market: str, price: float):
+        """Update a mark and execute a triggered protective exit atomically."""
         if price <= 0:
             raise PaperTradeRejected("Price must be positive.")
+        symbol = symbol.strip().upper()
+        fee_rate, slip_rate = 0.001, 0.0005
+        now = datetime.now(timezone.utc).isoformat()
+
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            position = db.execute("SELECT * FROM positions WHERE market=? AND symbol=?", (market, symbol.upper())).fetchone()
+            position = db.execute(
+                "SELECT * FROM positions WHERE market=? AND symbol=?", (market, symbol)
+            ).fetchone()
             if not position:
-                return {"symbol": symbol.upper(), "updated": False, "reason": "no_open_position"}
-            db.execute("UPDATE positions SET last_price=?,updated_at=? WHERE market=? AND symbol=?",
-                       (price, datetime.now(timezone.utc).isoformat(), market, symbol.upper()))
-            stop = position["stop_loss"]
-            should_exit = stop is not None and price <= stop
-            if not should_exit:
-                return {"symbol": symbol.upper(), "updated": True, "stop_triggered": False}
-        order = self.place_order(symbol, market, "sell", position["quantity"], price,
-                                 reason="stop_loss_trigger")
-        return {"symbol": symbol.upper(), "updated": True, "stop_triggered": True, "order": order}
+                return {"symbol": symbol, "updated": False, "reason": "no_open_position"}
+            if position["stop_loss"] is None:
+                raise PaperTradeRejected(
+                    "This legacy position has no stop-loss. Review and close it manually."
+                )
+
+            decision = evaluate_long_exit(
+                entry_price=float(position["average_price"]),
+                current_price=float(price),
+                highest_price=float(position["high_watermark"] or position["last_price"]),
+                current_stop=float(position["stop_loss"]),
+                policy=LongExitPolicy(),
+            )
+            db.execute(
+                """UPDATE positions SET last_price=?,stop_loss=?,high_watermark=?,updated_at=?
+                   WHERE market=? AND symbol=?""",
+                (price, decision["effective_stop"], decision["high_watermark"],
+                 now, market, symbol),
+            )
+            quantity = float(position["quantity"])
+
+            if not decision["exit_triggered"]:
+                return {
+                    "symbol": symbol, "updated": True, "stop_triggered": False,
+                    "effective_stop": decision["effective_stop"],
+                    "high_watermark": decision["high_watermark"],
+                    "break_even_active": decision["break_even_active"],
+                    "trailing_active": decision["trailing_active"],
+                }
+
+            # Keep the position mark, cash update, order journal and deletion in
+            # one SQLite transaction so concurrent price ticks cannot double-sell.
+            execution_price = price * (1 - slip_rate)
+            notional = quantity * execution_price
+            fee = notional * fee_rate
+            realized = (execution_price - float(position["average_price"])) * quantity - fee
+            db.execute(
+                "UPDATE account SET cash=cash+?,realized_pnl=realized_pnl+? WHERE id=1",
+                (notional - fee, realized),
+            )
+            db.execute(
+                "DELETE FROM positions WHERE market=? AND symbol=?", (market, symbol)
+            )
+            order_id = f"PAPER-{uuid4().hex[:12].upper()}"
+            db.execute(
+                "INSERT INTO orders VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                (order_id, symbol, market, "sell", quantity, execution_price, fee,
+                 abs(execution_price - price) * quantity, realized,
+                 "filled_simulated", f"protective_exit:{decision['exit_reason']}", now),
+            )
+            order = {
+                "id": order_id, "symbol": symbol, "market": market, "side": "sell",
+                "quantity": quantity, "price": round(execution_price, 6),
+                "fee": round(fee, 4), "realized_pnl": round(realized, 4),
+                "status": "filled_simulated", "created_at": now,
+            }
+            return {
+                "symbol": symbol, "updated": True, "stop_triggered": True,
+                "exit_reason": decision["exit_reason"],
+                "effective_stop": decision["effective_stop"], "order": order,
+            }
