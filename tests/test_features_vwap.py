@@ -25,4 +25,4 @@ def test_vwap_resets_for_each_utc_session():
                 + frame.loc[first_bar_second_day, "Close"]) / 3
     actual = result.loc[first_bar_second_day, "vwap"]
 
-    assert actual == expected
+    assert np.isclose(actual, expected, rtol=1e-12, atol=1e-12)
