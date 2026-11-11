@@ -36,7 +36,7 @@ python -m venv .venv
 # activate environment
 pip install -r requirements.txt
 pip install -r backend/requirements.txt
-uvicorn app.main:app --app-dir backend --reload --port 8000
+uvicorn app.main:app --app-dir backend --reload --port 8000 --env-file .env
 ```
 API docs: http://localhost:8000/docs
 
