@@ -226,13 +226,13 @@ function App() {
       </div>
       <article className="panel dhan-panel">
         <div className="panel-title"><div><span className="eyebrow">REAL-TIME MARKET DATA</span><h2>DhanHQ live feed</h2></div><Activity size={19}/></div>
-        <p className="muted">Optional DhanHQ v2 WebSocket quotes. Incoming INR prices update mapped paper positions and evaluate protective exits. This connection cannot place real broker orders.</p>
+        <p className="muted">Optional DhanHQ v2 WebSocket quotes. Incoming NSE/BSE cash-equity INR prices update mapped paper positions and evaluate protective exits. This connection cannot place real broker orders. Autonomous entries require a quote received within the last 10 seconds.</p>
         <div className="controls dhan-controls">
           <select value={dhanSegment} onChange={e=>setDhanSegment(e.target.value)} aria-label="Dhan exchange segment">
             <option value="NSE_EQ">NSE Equity</option><option value="BSE_EQ">BSE Equity</option>
           </select>
-          <input value={dhanSecurityId} onChange={e=>setDhanSecurityId(e.target.value.replace(/[^0-9]/g,''))} placeholder="Dhan Security ID" aria-label="Dhan Security ID"/>
-          <button onClick={dhanStatus?.running ? stopDhanFeed : startDhanFeed} disabled={dhanBusy || (!dhanStatus?.running && (!dhanStatus?.configured || !dhanSecurityId.trim()))}>
+          <input value={dhanSecurityId} onChange={e=>setDhanSecurityId(e.target.value.replace(/[^0-9]/g,''))} placeholder="Dhan Security ID" aria-label="Dhan Security ID" disabled={market !== 'stocks'}/>
+          <button onClick={dhanStatus?.running ? stopDhanFeed : startDhanFeed} disabled={dhanBusy || market !== 'stocks' || (!dhanStatus?.running && (!dhanStatus?.configured || !dhanSecurityId.trim()))}>
             {dhanBusy ? 'Connecting…' : dhanStatus?.running ? 'Stop feed' : 'Connect live feed'}
           </button>
         </div>
