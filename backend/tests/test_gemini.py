@@ -1,5 +1,7 @@
 import pytest
+from fastapi.testclient import TestClient
 
+from app.main import app
 from app.gemini import (
     GeminiMarketBrief,
     GeminiNotConfiguredError,
@@ -23,6 +25,24 @@ def test_gemini_is_optional_when_key_is_missing(monkeypatch):
     assert status["configured"] is False
     with pytest.raises(GeminiNotConfiguredError):
         generate_market_brief("RELIANCE", "stocks", {"signal": "hold"})
+
+
+def test_ai_status_and_market_brief_are_safe_without_api_key(monkeypatch):
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    client = TestClient(app)
+
+    status = client.get("/api/ai/status")
+    assert status.status_code == 200
+    assert status.json()["configured"] is False
+    assert status.json()["live_trading_enabled"] is False
+
+    brief = client.post("/api/ai/market-brief", json={
+        "symbol": "RELIANCE",
+        "market": "stocks",
+        "analysis": {"signal": "hold"},
+    })
+    assert brief.status_code == 503
+    assert "GEMINI_API_KEY" in brief.json()["detail"]
 
 
 def test_market_brief_schema_restricts_ai_output():
