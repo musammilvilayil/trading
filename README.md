@@ -9,7 +9,8 @@ Personal AI research and **autonomous paper-trading** workspace, built on top of
 - FX conversion to INR using recent provider FX closes, with fail-closed behavior when a conversion is unavailable.
 - FastAPI backend and responsive React/Vite dashboard.
 - Optional Google Gemini market-intelligence layer: structured market briefs, technical interpretation, balanced bull/bear scenarios, risk notes and sentiment classification for explicitly supplied headlines.
-- SQLite paper ledger with persistent account, average-cost accounting, realized/unrealized P&L, simulated fees/slippage, order journal and stop-loss monitoring.
+- SQLite paper ledger with persistent account, average-cost accounting, realized/unrealized P&L, simulated fees/slippage, order journal and protective exit monitoring.
+- Protective exit manager: initial stop, break-even stop after +0.8%, trailing stop activation after +1.2%, and a 0.6% trailing distance. Stops only ratchet upward for long positions.
 - Deterministic risk limits: 0.5% equity risk per trade, 2% daily drawdown guard, 10% initial-capital buy-order cap and 50% gross exposure cap.
 - EMA crossover historical backtest with next-candle-open execution, fees, slippage, drawdown, Sharpe and win-rate reporting.
 - Expanding-window, out-of-sample ML walk-forward evaluation with accuracy, precision, recall, F1, ROC-AUC and Brier score. Backtest capital is converted from INR into the instrument quote currency and results are reported in that currency.
@@ -77,7 +78,8 @@ The SQLite ledger persists in the named `atlas_data` volume.
 | POST | `/api/backtest/ml` | Expanding-window out-of-sample ML metrics |
 | GET | `/api/paper/portfolio` | Paper account and positions |
 | POST | `/api/paper/orders` | Simulated INR-denominated order |
-| POST | `/api/paper/market-tick` | Mark position and check stop-loss |
+| GET | `/api/risk/policy` | Active deterministic risk and exit policy |
+| POST | `/api/paper/market-tick` | Mark position and run protective exit manager |
 | GET | `/api/ai/status` | Gemini configuration status (never returns the key) |\n| POST | `/api/ai/market-brief` | Gemini advisory market brief from supplied ML analysis and optional headlines |\n| GET | `/api/automation/status` | Autonomous worker status |
 | POST | `/api/automation/start` | Start paper-only autonomous scanning |
 | POST | `/api/automation/stop` | Stop autonomous scanning |
